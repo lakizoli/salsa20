@@ -2,5 +2,13 @@
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="salsa20.c" />
+    <ClCompile Include="runcipher.cpp" />
+    <ClCompile Include="speedupSalsa20.cpp" />
+    <ClCompile Include="checkfiles.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="defs.h" />
+    <ClInclude Include="ScopedClock.hpp" />
   </ItemGroup>
 </Project>

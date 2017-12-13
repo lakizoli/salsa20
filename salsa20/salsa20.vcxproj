@@ -19,7 +19,15 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="checkfiles.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="salsa20.c" />
+    <ClCompile Include="runcipher.cpp" />
+    <ClCompile Include="speedupSalsa20.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="defs.h" />
+    <ClInclude Include="ScopedClock.hpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{D4C7BEE1-ACEB-4076-A77F-B30F3A433BA6}</ProjectGuid>
