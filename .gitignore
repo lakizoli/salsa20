@@ -1,1 +1,5 @@
 .vs/**
+**/*.user
+**/x64
+salsa20.VC.db
+salsa20.VC.VC.opendb
