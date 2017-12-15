@@ -174,23 +174,21 @@ static void scrypt_core (uint32_t* X) {
 	const int32_t N = 1024;
 	ALIGN_PREFIX (32) uint32_t V[1024 * 32 * sizeof (uint32_t)] ALIGN_POSTFIX (32); //1024*128
 
-#define x00 (*(__m256i*)&X[0])
-#define x08 (*(__m256i*)&X[8])
-#define x16 (*(__m256i*)&X[16])
-#define x24 (*(__m256i*)&X[24])
-
 	for (uint32_t i = 0; i < N; i++) {
+		__m256i* srcX = (__m256i*) &X[0];
+		__m256i* destV = (__m256i*) &V[i * 32];
+
 		//memcpy (&V[i * 32], X, 128);
-		_mm256_store_si256 ((__m256i*) &V[i * 32 + 0], x00);
-		_mm256_store_si256 ((__m256i*) &V[i * 32 + 8], x08);
-		_mm256_store_si256 ((__m256i*) &V[i * 32 + 16], x16);
-		_mm256_store_si256 ((__m256i*) &V[i * 32 + 24], x24);
+		_mm256_store_si256 (destV++, srcX[0]);
+		_mm256_store_si256 (destV++, srcX[1]);
+		_mm256_store_si256 (destV++, srcX[2]);
+		_mm256_store_si256 (destV, srcX[3]);
 
 		//xor_salsa8 (&X[0], &X[16]);
-		xor_salsa8 (x16, x24, x00, x08); //The order of the input and output parameters turned!!!
+		xor_salsa8 (srcX[2], srcX[3], srcX[0], srcX[1]); //The order of the input and output parameters turned!!!
 
-										 //xor_salsa8 (&X[16], &X[0]);
-		xor_salsa8 (x00, x08, x16, x24);
+		 //xor_salsa8 (&X[16], &X[0]);
+		xor_salsa8 (srcX[0], srcX[1], srcX[2], srcX[3]);
 	}
 
 	for (uint32_t i = 0; i < N; i++) {
@@ -199,22 +197,19 @@ static void scrypt_core (uint32_t* X) {
 		//for (uint32_t k = 0; k < 32; k++) {
 		//	X[k] ^= V[j + k];
 		//}
-		x00 = _mm256_xor_si256 (x00, *(__m256i*) &V[j + 0]);
-		x08 = _mm256_xor_si256 (x08, *(__m256i*) &V[j + 8]);
-		x16 = _mm256_xor_si256 (x16, *(__m256i*) &V[j + 16]);
-		x24 = _mm256_xor_si256 (x24, *(__m256i*) &V[j + 24]);
+		__m256i* srcV = (__m256i*) &V[j];
+		__m256i* destX = (__m256i*) &X[0];
+		destX[0] = _mm256_xor_si256 (destX[0], *srcV++);
+		destX[1] = _mm256_xor_si256 (destX[1], *srcV++);
+		destX[2] = _mm256_xor_si256 (destX[2], *srcV++);
+		destX[3] = _mm256_xor_si256 (destX[3], *srcV);
 
 		//xor_salsa8 (&X[0], &X[16]);
-		xor_salsa8 (x16, x24, x00, x08);
+		xor_salsa8 (destX[2], destX[3], destX[0], destX[1]); //The order of the input and output parameters turned!!!
 
 		//xor_salsa8 (&X[16], &X[0]);
-		xor_salsa8 (x00, x08, x16, x24);
+		xor_salsa8 (destX[0], destX[1], destX[2], destX[3]);
 	}
-
-#undef x00
-#undef x08
-#undef x16
-#undef x24
 }
 
 static void scrypt_1024_1_1_256 (const uint32_t *input, uint32_t *output, uint32_t *midstate, unsigned char *scratchpad, int N) {
@@ -236,13 +231,14 @@ static void scrypt_1024_1_1_256 (const uint32_t *input, uint32_t *output, uint32
 
 #define SCRYPT_ITERATION_COUNT 1024
 
-void initSpeedupCypher () {
+uint32_t initSpeedupCypher () {
+	return 1; //Step count
 }
 
 void releaseSpeedupCypher () {
 }
 
-void speedupCypher (const uint32_t* input, uint32_t* output, size_t sourceIntegerCount, size_t targetIntegerCount) {
+void speedupCypher (uint32_t stepCount, const uint32_t* input, uint32_t* output, size_t sourceIntegerCount, size_t targetIntegerCount) {
 	uint32_t midstate[8] = { 1, 2, 3, 4, 5, 6, 7, 8 }; //test values
 
 	scrypt_1024_1_1_256 (input, output, midstate, NULL, SCRYPT_ITERATION_COUNT);

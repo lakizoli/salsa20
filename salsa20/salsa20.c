@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <assert.h>
 
 #	define ALIGN_PREFIX(x) __declspec(align(x))
 #	define ALIGN_POSTFIX(x)
@@ -209,10 +210,11 @@ unsigned char *scrypt_buffer_alloc (int N) {
 
 unsigned char* g_reference_scratchpad = NULL;
 
-void initReferenceCypher () {
+uint32_t initReferenceCypher () {
 	if (g_reference_scratchpad == NULL) {
 		g_reference_scratchpad = scrypt_buffer_alloc (SCRYPT_ITERATION_COUNT);
 	}
+	return SCRYPT_MAX_WAYS;
 }
 
 void releaseReferenceCypher () {
@@ -222,7 +224,9 @@ void releaseReferenceCypher () {
 	}
 }
 
-void referenceCypher (const uint32_t* input, uint32_t* output, size_t sourceIntegerCount, size_t targetIntegerCount) {
+void referenceCypher (uint32_t stepCount, const uint32_t* input, uint32_t* output, size_t sourceIntegerCount, size_t targetIntegerCount) {
+	assert (stepCount == 1);
+
 	uint32_t midstate[8] = { 1, 2, 3, 4, 5, 6, 7, 8 }; //test values
 
 	scrypt_1024_1_1_256 (input, output, midstate, g_reference_scratchpad, SCRYPT_ITERATION_COUNT);

@@ -7,8 +7,8 @@
 using namespace std;
 
 int RunCipher (const string& tag, const string& source, const string& target, size_t sourceIntegerCount, size_t targetIntegerCount,
-	function<void ()> initCypher, function<void ()> releaseCypher,
-	function<void (const uint32_t* input, uint32_t* output, size_t sourceIntegerCount, size_t targetIntegerCount)> cipher)
+	function<uint32_t ()> initCypher, function<void ()> releaseCypher,
+	function<void (uint32_t stepCount, const uint32_t* input, uint32_t* output, size_t sourceIntegerCount, size_t targetIntegerCount)> cipher)
 {
 	//Read whole input to the memory
 	ifstream inFile (source, ios::in | ios::binary);
@@ -53,9 +53,10 @@ int RunCipher (const string& tag, const string& source, const string& target, si
 	{
 		ScopedClock clk ("cipher: " + tag, "hash", chunkCount);
 
-		initCypher ();
-		for (size_t i = 0; i < chunkCount; ++i) {
-			cipher ((const uint32_t*) &buffer[i * inputChunkLen], (uint32_t*) &outputBuffer[i * outputChunkLen], sourceIntegerCount, targetIntegerCount);
+		uint32_t stepCount = initCypher ();
+		for (size_t i = 0; i < chunkCount; i += stepCount) {
+			uint32_t cycleStepCount = (uint32_t) (i + (size_t) stepCount >= chunkCount ? chunkCount - i : stepCount);
+			cipher (cycleStepCount, (const uint32_t*) &buffer[i * inputChunkLen], (uint32_t*) &outputBuffer[i * outputChunkLen], sourceIntegerCount, targetIntegerCount);
 		}
 		releaseCypher ();
 	}
