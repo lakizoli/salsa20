@@ -1,20 +1,105 @@
+#define _CRT_SECURE_NO_WARNINGS
+
 #include <stdint.h>
 #include <intrin.h>
 #include <cstring>
+#include <cassert>
+#include <cstdio>
 
-void speedupSalsa8 (const uint32_t input[16], uint32_t output[16]) {
-	//__m256i output0 = _mm256_setr_epi32 (output[0], output[1], output[2], output[3], output[4], output[5], output[6], output[7]);
-	//__m256i output1 = _mm256_setr_epi32 (output[8], output[9], output[10], output[11], output[12], output[13], output[14], output[15]);
+#	define ALIGN_PREFIX(x) __declspec(align(x))
+#	define ALIGN_POSTFIX(x)
 
-	//__m256i input0 = _mm256_setr_epi32 (input[0], input[1], input[2], input[3], input[4], input[5], input[6], input[7]);
-	//__m256i input1 = _mm256_setr_epi32 (input[8], input[9], input[10], input[11], input[12], input[13], input[14], input[15]);
+static inline uint32_t swab32 (uint32_t v) {
+	return _byteswap_ulong (v);
+}
 
-	__m256i output0 = _mm256_loadu_si256 ((__m256i const*) &output[0]);
-	__m256i output1 = _mm256_loadu_si256 ((__m256i const*) &output[8]);
+extern "C" {
+	void sha256_init (uint32_t *state);
+	void sha256_transform (uint32_t *state, const uint32_t *block, int swap);
+}
 
-	const __m256i input0 = _mm256_loadu_si256 ((__m256i const*) &input[0]);
-	const __m256i input1 = _mm256_loadu_si256 ((__m256i const*) &input[8]);
+static const uint32_t keypad[12] = {
+	0x80000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x00000280
+};
+static const uint32_t innerpad[11] = {
+	0x80000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x000004a0
+};
+static const uint32_t outerpad[8] = {
+	0x80000000, 0, 0, 0, 0, 0, 0, 0x00000300
+};
+static const uint32_t finalblk[16] = {
+	0x00000001, 0x80000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x00000620
+};
 
+static void HMAC_SHA256_80_init (const uint32_t *key,
+	uint32_t *tstate, uint32_t *ostate) {
+	uint32_t ihash[8];
+	uint32_t pad[16];
+	int i;
+
+	/* tstate is assumed to contain the midstate of key */
+	memcpy (pad, key + 16, 16);
+	memcpy (pad + 4, keypad, 48);
+	sha256_transform (tstate, pad, 0);
+	memcpy (ihash, tstate, 32);
+
+	sha256_init (ostate);
+	for (i = 0; i < 8; i++)
+		pad[i] = ihash[i] ^ 0x5c5c5c5c;
+	for (; i < 16; i++)
+		pad[i] = 0x5c5c5c5c;
+	sha256_transform (ostate, pad, 0);
+
+	sha256_init (tstate);
+	for (i = 0; i < 8; i++)
+		pad[i] = ihash[i] ^ 0x36363636;
+	for (; i < 16; i++)
+		pad[i] = 0x36363636;
+	sha256_transform (tstate, pad, 0);
+}
+
+static void PBKDF2_SHA256_80_128 (const uint32_t *tstate,
+	const uint32_t *ostate, const uint32_t *salt, uint32_t *output) {
+	uint32_t istate[8], ostate2[8];
+	uint32_t ibuf[16], obuf[16];
+	int i, j;
+
+	memcpy (istate, tstate, 32);
+	sha256_transform (istate, salt, 0);
+
+	memcpy (ibuf, salt + 16, 16);
+	memcpy (ibuf + 5, innerpad, 44);
+	memcpy (obuf + 8, outerpad, 32);
+
+	for (i = 0; i < 4; i++) {
+		memcpy (obuf, istate, 32);
+		ibuf[4] = i + 1;
+		sha256_transform (obuf, ibuf, 0);
+
+		memcpy (ostate2, ostate, 32);
+		sha256_transform (ostate2, obuf, 0);
+		for (j = 0; j < 8; j++)
+			output[8 * i + j] = swab32 (ostate2[j]);
+	}
+}
+
+static void PBKDF2_SHA256_128_32 (uint32_t *tstate, uint32_t *ostate,
+	const uint32_t *salt, uint32_t *output) {
+	uint32_t buf[16];
+	int i;
+
+	sha256_transform (tstate, salt, 1);
+	sha256_transform (tstate, salt + 16, 1);
+	sha256_transform (tstate, finalblk, 0);
+	memcpy (buf, tstate, 32);
+	memcpy (buf + 8, outerpad, 32);
+
+	sha256_transform (ostate, buf, 0);
+	for (i = 0; i < 8; i++)
+		output[i] = swab32 (ostate[i]);
+}
+
+static void xor_salsa8 (__m256i input0, __m256i input1, __m256i& output0, __m256i& output1) {
 	__m256i x0 = output0 = _mm256_xor_si256 (output0, input0);
 	__m256i x1 = output1 = _mm256_xor_si256 (output1, input1);
 
@@ -35,50 +120,6 @@ void speedupSalsa8 (const uint32_t input[16], uint32_t output[16]) {
 #define x13 x1.m256i_u32[5]
 #define x14 x1.m256i_u32[6]
 #define x15 x1.m256i_u32[7]
-
-	//for (int step = 0; step < 8; step += 2) {
-	//	/* Operate on columns. */
-	//	//x04 ^= R (x00 + x12, 7);	x09 ^= R (x05 + x01, 7);
-	//	//x14 ^= R (x10 + x06, 7);	x03 ^= R (x15 + x11, 7);
-	//	x04 ^= _rorx_u32 (x00 + x12, 32 - 7);	x09 ^= _rorx_u32 (x05 + x01, 32 - 7);
-	//	x14 ^= _rorx_u32 (x10 + x06, 32 - 7);	x03 ^= _rorx_u32 (x15 + x11, 32 - 7);
-
-	//	//x08 ^= R (x04 + x00, 9);	x13 ^= R (x09 + x05, 9);
-	//	//x02 ^= R (x14 + x10, 9);	x07 ^= R (x03 + x15, 9);
-	//	x08 ^= _rorx_u32 (x04 + x00, 32 - 9);	x13 ^= _rorx_u32 (x09 + x05, 32 - 9);
-	//	x02 ^= _rorx_u32 (x14 + x10, 32 - 9);	x07 ^= _rorx_u32 (x03 + x15, 32 - 9);
-
-	//	//x12 ^= R (x08 + x04, 13);	x01 ^= R (x13 + x09, 13);
-	//	//x06 ^= R (x02 + x14, 13);	x11 ^= R (x07 + x03, 13);
-	//	x12 ^= _rorx_u32 (x08 + x04, 32 - 13);	x01 ^= _rorx_u32 (x13 + x09, 32 - 13);
-	//	x06 ^= _rorx_u32 (x02 + x14, 32 - 13);	x11 ^= _rorx_u32 (x07 + x03, 32 - 13);
-
-	//	//x00 ^= R (x12 + x08, 18);	x05 ^= R (x01 + x13, 18);
-	//	//x10 ^= R (x06 + x02, 18);	x15 ^= R (x11 + x07, 18);
-	//	x00 ^= _rorx_u32 (x12 + x08, 32 - 18);	x05 ^= _rorx_u32 (x01 + x13, 32 - 18);
-	//	x10 ^= _rorx_u32 (x06 + x02, 32 - 18);	x15 ^= _rorx_u32 (x11 + x07, 32 - 18);
-
-	//	///* Operate on rows. */
-	//	//x01 ^= R (x00 + x03, 7);	x06 ^= R (x05 + x04, 7);
-	//	//x11 ^= R (x10 + x09, 7);	x12 ^= R (x15 + x14, 7);
-	//	x01 ^= _rorx_u32 (x00 + x03, 32 - 7);	x06 ^= _rorx_u32 (x05 + x04, 32 - 7);
-	//	x11 ^= _rorx_u32 (x10 + x09, 32 - 7);	x12 ^= _rorx_u32 (x15 + x14, 32 - 7);
-
-	//	//x02 ^= R (x01 + x00, 9);	x07 ^= R (x06 + x05, 9);
-	//	//x08 ^= R (x11 + x10, 9);	x13 ^= R (x12 + x15, 9);
-	//	x02 ^= _rorx_u32 (x01 + x00, 32 - 9);	x07 ^= _rorx_u32 (x06 + x05, 32 - 9);
-	//	x08 ^= _rorx_u32 (x11 + x10, 32 - 9);	x13 ^= _rorx_u32 (x12 + x15, 32 - 9);
-
-	//	//x03 ^= R (x02 + x01, 13);	x04 ^= R (x07 + x06, 13);
-	//	//x09 ^= R (x08 + x11, 13);	x14 ^= R (x13 + x12, 13);
-	//	x03 ^= _rorx_u32 (x02 + x01, 32 - 13);	x04 ^= _rorx_u32 (x07 + x06, 32 - 13);
-	//	x09 ^= _rorx_u32 (x08 + x11, 32 - 13);	x14 ^= _rorx_u32 (x13 + x12, 32 - 13);
-
-	//	//x00 ^= R (x03 + x02, 18);	x05 ^= R (x04 + x07, 18);
-	//	//x10 ^= R (x09 + x08, 18);	x15 ^= R (x14 + x13, 18);
-	//	x00 ^= _rorx_u32 (x03 + x02, 32 - 18);	x05 ^= _rorx_u32 (x04 + x07, 32 - 18);
-	//	x10 ^= _rorx_u32 (x09 + x08, 32 - 18);	x15 ^= _rorx_u32 (x14 + x13, 32 - 18);
-	//}
 
 #define SALSA_STEP {																				 \
 		x04 ^= _rorx_u32 (x00 + x12, 32 - 7);	x09 ^= _rorx_u32 (x05 + x01, 32 - 7);				 \
@@ -105,12 +146,114 @@ void speedupSalsa8 (const uint32_t input[16], uint32_t output[16]) {
 	SALSA_STEP;
 	SALSA_STEP;
 
+#undef x00
+#undef x01
+#undef x02
+#undef x03
+#undef x04
+#undef x05
+#undef x06
+#undef x07
+
+#undef x08
+#undef x09
+#undef x10
+#undef x11
+#undef x12
+#undef x13
+#undef x14
+#undef x15
+
+#undef SALSA_STEP
+
 	output0 = _mm256_add_epi32 (output0, x0);
 	output1 = _mm256_add_epi32 (output1, x1);
+}
 
-	//memcpy (&output[0], &output0.m256i_u32[0], 8 * sizeof (uint32_t));
-	//memcpy (&output[8], &output1.m256i_u32[0], 8 * sizeof (uint32_t));
+static void scrypt_core (uint32_t* X) {
+	const int32_t N = 1024;
+	ALIGN_PREFIX (32) uint32_t V[1024 * 32 * sizeof (uint32_t)] ALIGN_POSTFIX (32); //1024*128
 
-	_mm256_storeu_si256 ((__m256i*) &output[0], output0);
-	_mm256_storeu_si256 ((__m256i*) &output[8], output1);
+#define x00 (*(__m256i*)&X[0])
+#define x08 (*(__m256i*)&X[8])
+#define x16 (*(__m256i*)&X[16])
+#define x24 (*(__m256i*)&X[24])
+
+	for (uint32_t i = 0; i < N; i++) {
+		//memcpy (&V[i * 32], X, 128);
+		_mm256_store_si256 ((__m256i*) &V[i * 32 + 0], x00);
+		_mm256_store_si256 ((__m256i*) &V[i * 32 + 8], x08);
+		_mm256_store_si256 ((__m256i*) &V[i * 32 + 16], x16);
+		_mm256_store_si256 ((__m256i*) &V[i * 32 + 24], x24);
+
+		//xor_salsa8 (&X[0], &X[16]);
+		xor_salsa8 (x16, x24, x00, x08); //The order of the input and output parameters turned!!!
+
+										 //xor_salsa8 (&X[16], &X[0]);
+		xor_salsa8 (x00, x08, x16, x24);
+	}
+
+	for (uint32_t i = 0; i < N; i++) {
+		uint32_t j = 32 * (X[16] & (N - 1));
+
+		//for (uint32_t k = 0; k < 32; k++) {
+		//	X[k] ^= V[j + k];
+		//}
+		x00 = _mm256_xor_si256 (x00, *(__m256i*) &V[j + 0]);
+		x08 = _mm256_xor_si256 (x08, *(__m256i*) &V[j + 8]);
+		x16 = _mm256_xor_si256 (x16, *(__m256i*) &V[j + 16]);
+		x24 = _mm256_xor_si256 (x24, *(__m256i*) &V[j + 24]);
+
+		//xor_salsa8 (&X[0], &X[16]);
+		xor_salsa8 (x16, x24, x00, x08);
+
+		//xor_salsa8 (&X[16], &X[0]);
+		xor_salsa8 (x00, x08, x16, x24);
+	}
+
+#undef x00
+#undef x08
+#undef x16
+#undef x24
+}
+
+static void scrypt_1024_1_1_256 (const uint32_t *input, uint32_t *output, uint32_t *midstate, unsigned char *scratchpad, int N) {
+	assert (N == 1024);
+
+	uint32_t tstate[8], ostate[8];
+	ALIGN_PREFIX (128) uint32_t X[32] ALIGN_POSTFIX (128);
+
+	memcpy (tstate, midstate, 32);
+	HMAC_SHA256_80_init (input, tstate, ostate);
+	PBKDF2_SHA256_80_128 (tstate, ostate, input, X);
+
+	scrypt_core (X);
+
+	PBKDF2_SHA256_128_32 (tstate, ostate, X, output);
+}
+
+//Speedup cypher caller
+
+#define SCRYPT_ITERATION_COUNT 1024
+
+void initSpeedupCypher () {
+}
+
+void releaseSpeedupCypher () {
+}
+
+void speedupCypher (const uint32_t* input, uint32_t* output, size_t sourceIntegerCount, size_t targetIntegerCount) {
+	uint32_t midstate[8] = { 1, 2, 3, 4, 5, 6, 7, 8 }; //test values
+
+	scrypt_1024_1_1_256 (input, output, midstate, NULL, SCRYPT_ITERATION_COUNT);
+
+	////TEST
+	//FILE* fout = fopen ("d:\\work\\salsa2\\new.dat", "ab"); //"wb" to delete content
+	//if (fout) {
+	//	for (int i = 0; i < targetIntegerCount; ++i) {
+	//		fprintf (fout, "0x%08x\n", output[i]);
+	//	}
+	//	fclose (fout);
+	//}
+	////END TEST
 }

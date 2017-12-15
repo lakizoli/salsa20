@@ -6,6 +6,7 @@
     <ClCompile Include="runcipher.cpp" />
     <ClCompile Include="speedupSalsa20.cpp" />
     <ClCompile Include="checkfiles.cpp" />
+    <ClCompile Include="sha2.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="defs.h" />

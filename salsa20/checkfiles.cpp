@@ -42,7 +42,7 @@ int HasSameContent (const string& file1, const string& file2, bool& same) {
 	vector<uint8_t> buffer1 (chunkLen);
 	vector<uint8_t> buffer2 (chunkLen);
 	for (size_t i = 0; i < chunkCount; ++i) {
-		size_t readLen = i == chunkCount - 1 ? chunkLen : len1 % chunkLen;
+		size_t readLen = i == chunkCount - 1 ? len1 % chunkLen : chunkLen;
 
 		inFile1.read ((char*) &buffer1[0], readLen);
 		if (!inFile1) {

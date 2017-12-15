@@ -6,7 +6,10 @@
 
 using namespace std;
 
-int RunCipher (const string& tag, const string& source, const string& target, function<void (const uint32_t input[16], uint32_t output[16])> cipher) {
+int RunCipher (const string& tag, const string& source, const string& target, size_t sourceIntegerCount, size_t targetIntegerCount,
+	function<void ()> initCypher, function<void ()> releaseCypher,
+	function<void (const uint32_t* input, uint32_t* output, size_t sourceIntegerCount, size_t targetIntegerCount)> cipher)
+{
 	//Read whole input to the memory
 	ifstream inFile (source, ios::in | ios::binary);
 	if (!inFile) {
@@ -24,13 +27,13 @@ int RunCipher (const string& tag, const string& source, const string& target, fu
 		return ERROR;
 	}
 
-	const size_t chunkLen = 16 * sizeof (uint32_t);
-	size_t chunkCount = len / chunkLen;
-	if (len % chunkLen > 0) {
+	const size_t inputChunkLen = sourceIntegerCount * sizeof (uint32_t);
+	size_t chunkCount = len / inputChunkLen;
+	if (len % inputChunkLen > 0) {
 		++chunkCount;
 	}
 
-	vector<uint8_t> buffer (chunkCount * chunkLen);
+	vector<uint8_t> buffer (chunkCount * inputChunkLen);
 	inFile.read ((char*) &buffer[0], len);
 	if (!inFile) {
 		return ERROR;
@@ -38,20 +41,23 @@ int RunCipher (const string& tag, const string& source, const string& target, fu
 
 	inFile.close ();
 
-	size_t residual = chunkCount * chunkLen - len;
+	size_t residual = chunkCount * inputChunkLen - len;
 	if (residual > 0) {
 		memset (&buffer[len], 0, residual);
 	}
 
 	//Run cipher
-	vector<uint8_t> outputBuffer (chunkCount * chunkLen);
+	const size_t outputChunkLen = targetIntegerCount * sizeof (uint32_t);
+	vector<uint8_t> outputBuffer (chunkCount * outputChunkLen);
 
 	{
-		ScopedClock clk ("cipher: " + tag + "");
+		ScopedClock clk ("cipher: " + tag, "hash", chunkCount);
 
+		initCypher ();
 		for (size_t i = 0; i < chunkCount; ++i) {
-			cipher ((const uint32_t*) &buffer[i * chunkLen], (uint32_t*) &outputBuffer[i * chunkLen]);
+			cipher ((const uint32_t*) &buffer[i * inputChunkLen], (uint32_t*) &outputBuffer[i * outputChunkLen], sourceIntegerCount, targetIntegerCount);
 		}
+		releaseCypher ();
 	}
 
 	//Write output file

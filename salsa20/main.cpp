@@ -9,9 +9,20 @@
 namespace fs = std::experimental::filesystem;
 using namespace std;
 
-extern "C" void referenceSalsa8 (uint32_t B[16], const uint32_t Bx[16]);
-extern void speedupSalsa8 (const uint32_t input[16], uint32_t output[16]);
-extern int RunCipher (const string& tag, const string& source, const string& target, function<void (const uint32_t input[16], uint32_t output[16])> cipher);
+extern "C" {
+	void initReferenceCypher ();
+	void releaseReferenceCypher ();
+	void referenceCypher (const uint32_t* input, uint32_t* output, size_t sourceIntegerCount, size_t targetIntegerCount);
+}
+
+extern void initSpeedupCypher ();
+extern void releaseSpeedupCypher ();
+extern void speedupCypher (const uint32_t* input, uint32_t* output, size_t sourceIntegerCount, size_t targetIntegerCount);
+
+extern int RunCipher (const string& tag, const string& source, const string& target, size_t sourceIntegerCount, size_t targetIntegerCount,
+	function<void ()> initCypher, function<void ()> releaseCypher,
+	function<void (const uint32_t* input, uint32_t* output, size_t sourceIntegerCount, size_t targetIntegerCount)> cipher);
+
 extern int HasSameContent (const string& file1, const string& file2, bool& same);
 
 static int PrintUsage (char* exePath) {
@@ -26,12 +37,22 @@ int main (int argc, char* argv[]) {
 		return PrintUsage (argv[0]);
 	}
 
+	const size_t sourceIntegerCount = 20; //count of uint32_t in source chunk
+	const size_t targetIntegerCount = 8; //count of uint32_t in target chunk
+
 	//Do reference cipher
 	cout << "Executing reference cipher..." << endl;
 
-	int resCode = RunCipher ("reference", argv[1], argv[2], [] (const uint32_t input[16], uint32_t output[16]) -> void {
-		referenceSalsa8 (output, input);
-	});
+	int resCode = RunCipher ("reference", argv[1], argv[2], sourceIntegerCount, targetIntegerCount,
+		[] () -> void {
+			initReferenceCypher ();
+		},
+		[] () -> void {
+			releaseReferenceCypher ();
+		},
+		[] (const uint32_t* input, uint32_t* output, size_t sourceIntegerCount, size_t targetIntegerCount) -> void {
+			referenceCypher (input, output, sourceIntegerCount, targetIntegerCount);
+		});
 	if (resCode != SUCCESS) {
 		cout << "Error occured!" << endl;
 		return resCode;
@@ -40,9 +61,16 @@ int main (int argc, char* argv[]) {
 	//Do speedup cipher
 	cout << "Executing speedup cipher..." << endl;
 
-	resCode = RunCipher ("speedup", argv[1], argv[3], [] (const uint32_t input[16], uint32_t output[16]) -> void {
-		speedupSalsa8 (input, output);
-	});
+	resCode = RunCipher ("speedup", argv[1], argv[3], sourceIntegerCount, targetIntegerCount,
+		[] () -> void {
+			initSpeedupCypher ();
+		},
+		[] () -> void {
+			releaseSpeedupCypher ();
+		},
+		[] (const uint32_t* input, uint32_t* output, size_t sourceIntegerCount, size_t targetIntegerCount) -> void {
+			speedupCypher (input, output, sourceIntegerCount, targetIntegerCount);
+		});
 	if (resCode != SUCCESS) {
 		cout << "Error occured!" << endl;
 		return resCode;
