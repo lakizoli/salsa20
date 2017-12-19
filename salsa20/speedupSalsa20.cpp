@@ -4,12 +4,11 @@
 #include <intrin.h>
 #include <cstring>
 #include <cassert>
-#include <cstdio>
 
 #define ALIGN_PREFIX(x) __declspec(align(x))
 #define ALIGN_POSTFIX(x)
 
-#define SCRYPT_STEP_COUNT 1
+#define SCRYPT_STEP_COUNT 8
 
 static inline uint32_t swab32 (uint32_t v) {
 	return _byteswap_ulong (v);
@@ -101,104 +100,33 @@ static void PBKDF2_SHA256_128_32 (uint32_t *tstate, uint32_t *ostate,
 		output[i] = swab32 (ostate[i]);
 }
 
-static void xor_salsa8 (__m256i input0, __m256i input1, __m256i& output0, __m256i& output1) {
-	__m256i x0 = output0 = _mm256_xor_si256 (output0, input0);
-	__m256i x1 = output1 = _mm256_xor_si256 (output1, input1);
-
-#define x00 x0.m256i_u32[0]
-#define x01 x0.m256i_u32[1]
-#define x02 x0.m256i_u32[2]
-#define x03 x0.m256i_u32[3]
-#define x04 x0.m256i_u32[4]
-#define x05 x0.m256i_u32[5]
-#define x06 x0.m256i_u32[6]
-#define x07 x0.m256i_u32[7]
-
-#define x08 x1.m256i_u32[0]
-#define x09 x1.m256i_u32[1]
-#define x10 x1.m256i_u32[2]
-#define x11 x1.m256i_u32[3]
-#define x12 x1.m256i_u32[4]
-#define x13 x1.m256i_u32[5]
-#define x14 x1.m256i_u32[6]
-#define x15 x1.m256i_u32[7]
-
-#define SALSA_STEP {																				 \
-		x04 ^= _rorx_u32 (x00 + x12, 32 - 7);	x09 ^= _rorx_u32 (x05 + x01, 32 - 7);				 \
-		x14 ^= _rorx_u32 (x10 + x06, 32 - 7);	x03 ^= _rorx_u32 (x15 + x11, 32 - 7);				 \
-		x08 ^= _rorx_u32 (x04 + x00, 32 - 9);	x13 ^= _rorx_u32 (x09 + x05, 32 - 9);				 \
-		x02 ^= _rorx_u32 (x14 + x10, 32 - 9);	x07 ^= _rorx_u32 (x03 + x15, 32 - 9);				 \
-		x12 ^= _rorx_u32 (x08 + x04, 32 - 13);	x01 ^= _rorx_u32 (x13 + x09, 32 - 13);				 \
-		x06 ^= _rorx_u32 (x02 + x14, 32 - 13);	x11 ^= _rorx_u32 (x07 + x03, 32 - 13);				 \
-		x00 ^= _rorx_u32 (x12 + x08, 32 - 18);	x05 ^= _rorx_u32 (x01 + x13, 32 - 18);				 \
-		x10 ^= _rorx_u32 (x06 + x02, 32 - 18);	x15 ^= _rorx_u32 (x11 + x07, 32 - 18);				 \
-																									 \
-		x01 ^= _rorx_u32 (x00 + x03, 32 - 7);	x06 ^= _rorx_u32 (x05 + x04, 32 - 7);				 \
-		x11 ^= _rorx_u32 (x10 + x09, 32 - 7);	x12 ^= _rorx_u32 (x15 + x14, 32 - 7);				 \
-		x02 ^= _rorx_u32 (x01 + x00, 32 - 9);	x07 ^= _rorx_u32 (x06 + x05, 32 - 9);				 \
-		x08 ^= _rorx_u32 (x11 + x10, 32 - 9);	x13 ^= _rorx_u32 (x12 + x15, 32 - 9);				 \
-		x03 ^= _rorx_u32 (x02 + x01, 32 - 13);	x04 ^= _rorx_u32 (x07 + x06, 32 - 13);				 \
-		x09 ^= _rorx_u32 (x08 + x11, 32 - 13);	x14 ^= _rorx_u32 (x13 + x12, 32 - 13);				 \
-		x00 ^= _rorx_u32 (x03 + x02, 32 - 18);	x05 ^= _rorx_u32 (x04 + x07, 32 - 18);				 \
-		x10 ^= _rorx_u32 (x09 + x08, 32 - 18);	x15 ^= _rorx_u32 (x14 + x13, 32 - 18);				 \
-	}
-
-	SALSA_STEP;
-	SALSA_STEP;
-	SALSA_STEP;
-	SALSA_STEP;
-
-#undef x00
-#undef x01
-#undef x02
-#undef x03
-#undef x04
-#undef x05
-#undef x06
-#undef x07
-
-#undef x08
-#undef x09
-#undef x10
-#undef x11
-#undef x12
-#undef x13
-#undef x14
-#undef x15
-
-#undef SALSA_STEP
-
-	output0 = _mm256_add_epi32 (output0, x0);
-	output1 = _mm256_add_epi32 (output1, x1);
-}
-
-static void xor_salsa8_parallel8 (__m256i input[2 * 8], __m256i output[2 * 8]) {
+static void xor_salsa8_parallel8 (__m256i input[2 * 8], __m256i output[2 * 8], uint32_t threadLen) {
 	//8x input[0] -> x00..08 (xorX[thread*2 + 0]), input[1] -> x09..x15 (xorX[thread*2 + 1])
 	__m256i xorX[16] = {
 		//thread 0
-		output[0] = _mm256_xor_si256 (output[0], input[0]),
-		output[1] = _mm256_xor_si256 (output[1], input[1]),
+		output[0*threadLen + 0] = _mm256_xor_si256 (output[0*threadLen + 0], input[0*threadLen + 0]),
+		output[0*threadLen + 1] = _mm256_xor_si256 (output[0*threadLen + 1], input[0*threadLen + 1]),
 		//thread 1
-		output[2] = _mm256_xor_si256 (output[2], input[2]),
-		output[3] = _mm256_xor_si256 (output[3], input[3]),
+		output[1*threadLen + 0] = _mm256_xor_si256 (output[1*threadLen + 0], input[1*threadLen + 0]),
+		output[1*threadLen + 1] = _mm256_xor_si256 (output[1*threadLen + 1], input[1*threadLen + 1]),
 		//thread 2
-		output[4] = _mm256_xor_si256 (output[4], input[4]),
-		output[5] = _mm256_xor_si256 (output[5], input[5]),
+		output[2*threadLen + 0] = _mm256_xor_si256 (output[2*threadLen + 0], input[2*threadLen + 0]),
+		output[2*threadLen + 1] = _mm256_xor_si256 (output[2*threadLen + 1], input[2*threadLen + 1]),
 		//thread 3
-		output[6] = _mm256_xor_si256 (output[6], input[6]),
-		output[7] = _mm256_xor_si256 (output[7], input[7]),
+		output[3*threadLen + 0] = _mm256_xor_si256 (output[3*threadLen + 0], input[3*threadLen + 0]),
+		output[3*threadLen + 1] = _mm256_xor_si256 (output[3*threadLen + 1], input[3*threadLen + 1]),
 		//thread 4
-		output[8] = _mm256_xor_si256 (output[8], input[8]),
-		output[9] = _mm256_xor_si256 (output[9], input[9]),
+		output[4*threadLen + 0] = _mm256_xor_si256 (output[4*threadLen + 0], input[4*threadLen + 0]),
+		output[4*threadLen + 1] = _mm256_xor_si256 (output[4*threadLen + 1], input[4*threadLen + 1]),
 		//thread 5
-		output[10] = _mm256_xor_si256 (output[10], input[10]),
-		output[11] = _mm256_xor_si256 (output[11], input[11]),
+		output[5*threadLen + 0] = _mm256_xor_si256 (output[5*threadLen + 0], input[5*threadLen + 0]),
+		output[5*threadLen + 1] = _mm256_xor_si256 (output[5*threadLen + 1], input[5*threadLen + 1]),
 		//thread 6
-		output[12] = _mm256_xor_si256 (output[12], input[12]),
-		output[13] = _mm256_xor_si256 (output[13], input[13]),
+		output[6*threadLen + 0] = _mm256_xor_si256 (output[6*threadLen + 0], input[6*threadLen + 0]),
+		output[6*threadLen + 1] = _mm256_xor_si256 (output[6*threadLen + 1], input[6*threadLen + 1]),
 		//thread 7
-		output[14] = _mm256_xor_si256 (output[14], input[14]),
-		output[15] = _mm256_xor_si256 (output[15], input[15]),
+		output[7*threadLen + 0] = _mm256_xor_si256 (output[7*threadLen + 0], input[7*threadLen + 0]),
+		output[7*threadLen + 1] = _mm256_xor_si256 (output[7*threadLen + 1], input[7*threadLen + 1])
 	};
 
 	//Transpose matrix
@@ -288,94 +216,87 @@ static void xor_salsa8_parallel8 (__m256i input[2 * 8], __m256i output[2 * 8]) {
 		_mm256_setr_epi32 (calcX[8].m256i_u32[7], calcX[9].m256i_u32[7], calcX[10].m256i_u32[7], calcX[11].m256i_u32[7], calcX[12].m256i_u32[7], calcX[13].m256i_u32[7], calcX[14].m256i_u32[7], calcX[15].m256i_u32[7]),
 	};
 
-	//Add result
-	output[0]  = _mm256_add_epi32 (output[0],  xX[0]);
-	output[1]  = _mm256_add_epi32 (output[1],  xX[1]);
-	output[2]  = _mm256_add_epi32 (output[2],  xX[2]);
-	output[3]  = _mm256_add_epi32 (output[3],  xX[3]);
-	output[4]  = _mm256_add_epi32 (output[4],  xX[4]);
-	output[5]  = _mm256_add_epi32 (output[5],  xX[5]);
-	output[6]  = _mm256_add_epi32 (output[6],  xX[6]);
-	output[7]  = _mm256_add_epi32 (output[7],  xX[7]);
-	output[8]  = _mm256_add_epi32 (output[8],  xX[8]);
-	output[9]  = _mm256_add_epi32 (output[9],  xX[9]);
-	output[10] = _mm256_add_epi32 (output[10], xX[10]);
-	output[11] = _mm256_add_epi32 (output[11], xX[11]);
-	output[12] = _mm256_add_epi32 (output[12], xX[12]);
-	output[13] = _mm256_add_epi32 (output[13], xX[13]);
-	output[14] = _mm256_add_epi32 (output[14], xX[14]);
-	output[15] = _mm256_add_epi32 (output[15], xX[15]);
+	//Calculate output
+	//Thread 0
+	output[0*threadLen + 0] = _mm256_add_epi32 (output[0*threadLen + 0], xX[0]);
+	output[0*threadLen + 1] = _mm256_add_epi32 (output[0*threadLen + 1], xX[1]);
+	//Thread 1
+	output[1*threadLen + 0] = _mm256_add_epi32 (output[1*threadLen + 0], xX[2]);
+	output[1*threadLen + 1] = _mm256_add_epi32 (output[1*threadLen + 1], xX[3]);
+	//Thread 2
+	output[2*threadLen + 0] = _mm256_add_epi32 (output[2*threadLen + 0], xX[4]);
+	output[2*threadLen + 1] = _mm256_add_epi32 (output[2*threadLen + 1], xX[5]);
+	//Thread 3
+	output[3*threadLen + 0] = _mm256_add_epi32 (output[3*threadLen + 0], xX[6]);
+	output[3*threadLen + 1] = _mm256_add_epi32 (output[3*threadLen + 1], xX[7]);
+	//Thread 4
+	output[4*threadLen + 0] = _mm256_add_epi32 (output[4*threadLen + 0], xX[8]);
+	output[4*threadLen + 1] = _mm256_add_epi32 (output[4*threadLen + 1], xX[9]);
+	//Thread 5
+	output[5*threadLen + 0] = _mm256_add_epi32 (output[5*threadLen + 0], xX[10]);
+	output[5*threadLen + 1] = _mm256_add_epi32 (output[5*threadLen + 1], xX[11]);
+	//Thread 6
+	output[6*threadLen + 0] = _mm256_add_epi32 (output[6*threadLen + 0], xX[12]);
+	output[6*threadLen + 1] = _mm256_add_epi32 (output[6*threadLen + 1], xX[13]);
+	//Thread 7
+	output[7*threadLen + 0] = _mm256_add_epi32 (output[7*threadLen + 0], xX[14]);
+	output[7*threadLen + 1] = _mm256_add_epi32 (output[7*threadLen + 1], xX[15]);
 }
+
+ALIGN_PREFIX (32) static uint32_t speedupScryptV[1024 * 32 * SCRYPT_STEP_COUNT] ALIGN_POSTFIX (32);
 
 static void scrypt_core (uint32_t* X) {
 	const int32_t N = 1024;
-	ALIGN_PREFIX (32) uint32_t V[N * 32 * SCRYPT_STEP_COUNT] ALIGN_POSTFIX (32);
 
-//#define TEST_CORE1_PAR8_IN												   \
-//	__m256i ti1 = srcX[2], ti2 = srcX[3], to1 = srcX[0], to2 = srcX[1];
-//
-//#define TEST_CORE1_PAR8													   \
-//	__m256i ti[16], to[16];												   \
-//	for (int ii = 0; ii < 8; ++ii) {									   \
-//		ti[ii * 2 + 0] = ti1;	to[ii * 2 + 0] = to1;					   \
-//		ti[ii * 2 + 1] = ti2;	to[ii * 2 + 1] = to2;					   \
-//	}																	   \
-//	xor_salsa8_parallel8 (ti, to);
-
-
-#define CORE1_STEP(step, i) 												 \
-		srcX = (__m256i*) &X[step * 32];									 \
-		destV = (__m256i*) &V[step * N * 32 + i * 32];						 \
+#define CORE1_PRE_STEP(step, i) { 											 \
+		__m256i* srcX = (__m256i*) &X[step * 32];							 \
+		__m256i* destV = (__m256i*) &speedupScryptV[step * N * 32 + i * 32]; \
 																			 \
 		_mm256_store_si256 (destV++, srcX[0]);								 \
 		_mm256_store_si256 (destV++, srcX[1]);								 \
 		_mm256_store_si256 (destV++, srcX[2]);								 \
 		_mm256_store_si256 (destV, srcX[3]);								 \
-																			 \
-		xor_salsa8 (srcX[2], srcX[3], srcX[0], srcX[1]);					 \
-		xor_salsa8 (srcX[0], srcX[1], srcX[2], srcX[3]);
+	}
 
-#define CORE2_STEP(step)													 \
-		j = 32 * (X[step * 32 + 16] & (N - 1));								 \
+#define CORE2_PRE_STEP(step) {												 \
+		uint32_t j = 32 * (X[step * 32 + 16] & (N - 1));					 \
 																			 \
-		srcV = (__m256i*) &V[step * N * 32 + j];							 \
-		destX = (__m256i*) &X[step * 32 + 0];								 \
+		__m256i* srcV = (__m256i*) &speedupScryptV[step * N * 32 + j];		 \
+		__m256i* destX = (__m256i*) &X[step * 32];							 \
 		destX[0] = _mm256_xor_si256 (destX[0], *srcV++);					 \
 		destX[1] = _mm256_xor_si256 (destX[1], *srcV++);					 \
 		destX[2] = _mm256_xor_si256 (destX[2], *srcV++);					 \
 		destX[3] = _mm256_xor_si256 (destX[3], *srcV);						 \
-																			 \
-		xor_salsa8 (destX[2], destX[3], destX[0], destX[1]);				 \
-		xor_salsa8 (destX[0], destX[1], destX[2], destX[3]);
-
-	for (uint32_t i = 0; i < N; i++) {
-		//memcpy (&V[i * 32], X, 128);
-		//xor_salsa8 (&X[0], &X[16]);
-		//xor_salsa8 (&X[16], &X[0]);
-
-		__m256i *srcX, *destV;
-
-		CORE1_STEP(0, i);
-		//CORE1_STEP(1, i);
-		//CORE1_STEP(2, i);
-		//CORE1_STEP(3, i);
 	}
 
 	for (uint32_t i = 0; i < N; i++) {
-		//uint32_t j = 32 * (X[16] & (N - 1));
-		//for (uint32_t k = 0; k < 32; k++) {
-		//	X[k] ^= V[j + k];
-		//}
-		//xor_salsa8 (&X[0], &X[16]);
-		//xor_salsa8 (&X[16], &X[0]);
+		CORE1_PRE_STEP (0, i);
+		CORE1_PRE_STEP (1, i);
+		CORE1_PRE_STEP (2, i);
+		CORE1_PRE_STEP (3, i);
+		CORE1_PRE_STEP (4, i);
+		CORE1_PRE_STEP (5, i);
+		CORE1_PRE_STEP (6, i);
+		CORE1_PRE_STEP (7, i);
 
-		uint32_t j;
-		__m256i *srcV, *destX;
+		__m256i* srcX = (__m256i*) &X[0 * 32];
+		xor_salsa8_parallel8 (&srcX[2], &srcX[0], 4);
+		xor_salsa8_parallel8 (&srcX[0], &srcX[2], 4);
+	}
 
-		CORE2_STEP(0);
-		//CORE2_STEP(1);
-		//CORE2_STEP(2);
-		//CORE2_STEP(3);
+	for (uint32_t i = 0; i < N; i++) {
+		CORE2_PRE_STEP (0);
+		CORE2_PRE_STEP (1);
+		CORE2_PRE_STEP (2);
+		CORE2_PRE_STEP (3);
+		CORE2_PRE_STEP (4);
+		CORE2_PRE_STEP (5);
+		CORE2_PRE_STEP (6);
+		CORE2_PRE_STEP (7);
+
+		__m256i* destX = (__m256i*) &X[0 * 32];
+		xor_salsa8_parallel8 (&destX[2], &destX[0], 4);
+		xor_salsa8_parallel8 (&destX[0], &destX[2], 4);
 	}
 
 #undef CORE1_STEP
@@ -395,6 +316,14 @@ static void scrypt_1024_1_1_256 (uint32_t stepCount, const uint32_t *input, uint
 	}
 
 	switch (stepCount) {
+	case 8:
+		INIT_SCRYPT (7);
+	case 7:
+		INIT_SCRYPT (6);
+	case 6:
+		INIT_SCRYPT (5);
+	case 5:
+		INIT_SCRYPT (4);
 	case 4:
 		INIT_SCRYPT (3);
 	case 3:
@@ -416,6 +345,14 @@ static void scrypt_1024_1_1_256 (uint32_t stepCount, const uint32_t *input, uint
 	}
 
 	switch (stepCount) {
+	case 8:
+		RELEASE_SCRYPT (7);
+	case 7:
+		RELEASE_SCRYPT (6);
+	case 6:
+		RELEASE_SCRYPT (5);
+	case 5:
+		RELEASE_SCRYPT (4);
 	case 4:
 		RELEASE_SCRYPT (3);
 	case 3:
@@ -435,8 +372,6 @@ static void scrypt_1024_1_1_256 (uint32_t stepCount, const uint32_t *input, uint
 
 //Speedup cypher caller
 
-#define SCRYPT_ITERATION_COUNT 1024
-
 uint32_t initSpeedupCypher () {
 	return SCRYPT_STEP_COUNT; //Step count
 }
@@ -446,9 +381,13 @@ void releaseSpeedupCypher () {
 
 void speedupCypher (uint32_t stepCount, const uint32_t* input, uint32_t* output, size_t sourceIntegerCount, size_t targetIntegerCount) {
 	uint32_t midstate[8 * SCRYPT_STEP_COUNT] = { 1, 2, 3, 4, 5, 6, 7, 8,
-		/*1, 2, 3, 4, 5, 6, 7, 8,
 		1, 2, 3, 4, 5, 6, 7, 8,
-		1, 2, 3, 4, 5, 6, 7, 8*/ }; //test values
+		1, 2, 3, 4, 5, 6, 7, 8,
+		1, 2, 3, 4, 5, 6, 7, 8,
+		1, 2, 3, 4, 5, 6, 7, 8,
+		1, 2, 3, 4, 5, 6, 7, 8,
+		1, 2, 3, 4, 5, 6, 7, 8,
+		1, 2, 3, 4, 5, 6, 7, 8 }; //test values
 
 	scrypt_1024_1_1_256 (stepCount, input, output, midstate);
 

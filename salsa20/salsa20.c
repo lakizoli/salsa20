@@ -3,7 +3,6 @@
 #include <memory.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <stdio.h>
 #include <assert.h>
 
 #	define ALIGN_PREFIX(x) __declspec(align(x))
