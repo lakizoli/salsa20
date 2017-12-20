@@ -4,6 +4,7 @@
 #include <intrin.h>
 #include <cstring>
 #include <cassert>
+#include <cstdio>
 
 #define ALIGN_PREFIX(x) __declspec(align(x))
 #define ALIGN_POSTFIX(x)
@@ -100,55 +101,59 @@ static void PBKDF2_SHA256_128_32 (uint32_t *tstate, uint32_t *ostate,
 		output[i] = swab32 (ostate[i]);
 }
 
+ALIGN_PREFIX (32) static uint32_t calcXBuffer[16 * 8] ALIGN_POSTFIX (32);
+
 static void xor_salsa8_parallel8 (__m256i input[2 * 8], __m256i output[2 * 8], uint32_t threadLen) {
 	//8x input[0] -> x00..08 (xorX[thread*2 + 0]), input[1] -> x09..x15 (xorX[thread*2 + 1])
-	__m256i xorX[16] = {
+	//__m256i xorX[16] = {
 		//thread 0
-		output[0*threadLen + 0] = _mm256_xor_si256 (output[0*threadLen + 0], input[0*threadLen + 0]),
-		output[0*threadLen + 1] = _mm256_xor_si256 (output[0*threadLen + 1], input[0*threadLen + 1]),
+		output[0*threadLen + 0] = _mm256_xor_si256 (output[0*threadLen + 0], input[0*threadLen + 0]);
+		output[0*threadLen + 1] = _mm256_xor_si256 (output[0*threadLen + 1], input[0*threadLen + 1]);
 		//thread 1
-		output[1*threadLen + 0] = _mm256_xor_si256 (output[1*threadLen + 0], input[1*threadLen + 0]),
-		output[1*threadLen + 1] = _mm256_xor_si256 (output[1*threadLen + 1], input[1*threadLen + 1]),
+		output[1*threadLen + 0] = _mm256_xor_si256 (output[1*threadLen + 0], input[1*threadLen + 0]);
+		output[1*threadLen + 1] = _mm256_xor_si256 (output[1*threadLen + 1], input[1*threadLen + 1]);
 		//thread 2
-		output[2*threadLen + 0] = _mm256_xor_si256 (output[2*threadLen + 0], input[2*threadLen + 0]),
-		output[2*threadLen + 1] = _mm256_xor_si256 (output[2*threadLen + 1], input[2*threadLen + 1]),
+		output[2*threadLen + 0] = _mm256_xor_si256 (output[2*threadLen + 0], input[2*threadLen + 0]);
+		output[2*threadLen + 1] = _mm256_xor_si256 (output[2*threadLen + 1], input[2*threadLen + 1]);
 		//thread 3
-		output[3*threadLen + 0] = _mm256_xor_si256 (output[3*threadLen + 0], input[3*threadLen + 0]),
-		output[3*threadLen + 1] = _mm256_xor_si256 (output[3*threadLen + 1], input[3*threadLen + 1]),
+		output[3*threadLen + 0] = _mm256_xor_si256 (output[3*threadLen + 0], input[3*threadLen + 0]);
+		output[3*threadLen + 1] = _mm256_xor_si256 (output[3*threadLen + 1], input[3*threadLen + 1]);
 		//thread 4
-		output[4*threadLen + 0] = _mm256_xor_si256 (output[4*threadLen + 0], input[4*threadLen + 0]),
-		output[4*threadLen + 1] = _mm256_xor_si256 (output[4*threadLen + 1], input[4*threadLen + 1]),
+		output[4*threadLen + 0] = _mm256_xor_si256 (output[4*threadLen + 0], input[4*threadLen + 0]);
+		output[4*threadLen + 1] = _mm256_xor_si256 (output[4*threadLen + 1], input[4*threadLen + 1]);
 		//thread 5
-		output[5*threadLen + 0] = _mm256_xor_si256 (output[5*threadLen + 0], input[5*threadLen + 0]),
-		output[5*threadLen + 1] = _mm256_xor_si256 (output[5*threadLen + 1], input[5*threadLen + 1]),
+		output[5*threadLen + 0] = _mm256_xor_si256 (output[5*threadLen + 0], input[5*threadLen + 0]);
+		output[5*threadLen + 1] = _mm256_xor_si256 (output[5*threadLen + 1], input[5*threadLen + 1]);
 		//thread 6
-		output[6*threadLen + 0] = _mm256_xor_si256 (output[6*threadLen + 0], input[6*threadLen + 0]),
-		output[6*threadLen + 1] = _mm256_xor_si256 (output[6*threadLen + 1], input[6*threadLen + 1]),
+		output[6*threadLen + 0] = _mm256_xor_si256 (output[6*threadLen + 0], input[6*threadLen + 0]);
+		output[6*threadLen + 1] = _mm256_xor_si256 (output[6*threadLen + 1], input[6*threadLen + 1]);
 		//thread 7
-		output[7*threadLen + 0] = _mm256_xor_si256 (output[7*threadLen + 0], input[7*threadLen + 0]),
-		output[7*threadLen + 1] = _mm256_xor_si256 (output[7*threadLen + 1], input[7*threadLen + 1])
-	};
+		output[7*threadLen + 0] = _mm256_xor_si256 (output[7*threadLen + 0], input[7*threadLen + 0]);
+		output[7*threadLen + 1] = _mm256_xor_si256 (output[7*threadLen + 1], input[7*threadLen + 1]);
+	//};
 
-	//Transpose matrix
-	__m256i calcX[16] = {
-		_mm256_setr_epi32 (xorX[0].m256i_u32[0], xorX[2].m256i_u32[0], xorX[4].m256i_u32[0], xorX[6].m256i_u32[0], xorX[8].m256i_u32[0], xorX[10].m256i_u32[0], xorX[12].m256i_u32[0], xorX[14].m256i_u32[0]),
-		_mm256_setr_epi32 (xorX[0].m256i_u32[1], xorX[2].m256i_u32[1], xorX[4].m256i_u32[1], xorX[6].m256i_u32[1], xorX[8].m256i_u32[1], xorX[10].m256i_u32[1], xorX[12].m256i_u32[1], xorX[14].m256i_u32[1]),
-		_mm256_setr_epi32 (xorX[0].m256i_u32[2], xorX[2].m256i_u32[2], xorX[4].m256i_u32[2], xorX[6].m256i_u32[2], xorX[8].m256i_u32[2], xorX[10].m256i_u32[2], xorX[12].m256i_u32[2], xorX[14].m256i_u32[2]),
-		_mm256_setr_epi32 (xorX[0].m256i_u32[3], xorX[2].m256i_u32[3], xorX[4].m256i_u32[3], xorX[6].m256i_u32[3], xorX[8].m256i_u32[3], xorX[10].m256i_u32[3], xorX[12].m256i_u32[3], xorX[14].m256i_u32[3]),
-		_mm256_setr_epi32 (xorX[0].m256i_u32[4], xorX[2].m256i_u32[4], xorX[4].m256i_u32[4], xorX[6].m256i_u32[4], xorX[8].m256i_u32[4], xorX[10].m256i_u32[4], xorX[12].m256i_u32[4], xorX[14].m256i_u32[4]),
-		_mm256_setr_epi32 (xorX[0].m256i_u32[5], xorX[2].m256i_u32[5], xorX[4].m256i_u32[5], xorX[6].m256i_u32[5], xorX[8].m256i_u32[5], xorX[10].m256i_u32[5], xorX[12].m256i_u32[5], xorX[14].m256i_u32[5]),
-		_mm256_setr_epi32 (xorX[0].m256i_u32[6], xorX[2].m256i_u32[6], xorX[4].m256i_u32[6], xorX[6].m256i_u32[6], xorX[8].m256i_u32[6], xorX[10].m256i_u32[6], xorX[12].m256i_u32[6], xorX[14].m256i_u32[6]),
-		_mm256_setr_epi32 (xorX[0].m256i_u32[7], xorX[2].m256i_u32[7], xorX[4].m256i_u32[7], xorX[6].m256i_u32[7], xorX[8].m256i_u32[7], xorX[10].m256i_u32[7], xorX[12].m256i_u32[7], xorX[14].m256i_u32[7]),
+	//Transpose matrix (calcX[i] = xorX[0].m256i_u32[i] <= i=0..7, calcX[i] = xorX[1].m256i_u32[i-8] <= i=8..15)
+	const __m256i vindex = _mm256_setr_epi32 (0, threadLen * 8, 2 * threadLen * 8, 3 * threadLen * 8, 4 * threadLen * 8, 5 * threadLen * 8, 6 * threadLen * 8, 7 * threadLen * 8);
+	const int* xBase = (const int*) output;
 
-		_mm256_setr_epi32 (xorX[1].m256i_u32[0], xorX[3].m256i_u32[0], xorX[5].m256i_u32[0], xorX[7].m256i_u32[0], xorX[9].m256i_u32[0], xorX[11].m256i_u32[0], xorX[13].m256i_u32[0], xorX[15].m256i_u32[0]),
-		_mm256_setr_epi32 (xorX[1].m256i_u32[1], xorX[3].m256i_u32[1], xorX[5].m256i_u32[1], xorX[7].m256i_u32[1], xorX[9].m256i_u32[1], xorX[11].m256i_u32[1], xorX[13].m256i_u32[1], xorX[15].m256i_u32[1]),
-		_mm256_setr_epi32 (xorX[1].m256i_u32[2], xorX[3].m256i_u32[2], xorX[5].m256i_u32[2], xorX[7].m256i_u32[2], xorX[9].m256i_u32[2], xorX[11].m256i_u32[2], xorX[13].m256i_u32[2], xorX[15].m256i_u32[2]),
-		_mm256_setr_epi32 (xorX[1].m256i_u32[3], xorX[3].m256i_u32[3], xorX[5].m256i_u32[3], xorX[7].m256i_u32[3], xorX[9].m256i_u32[3], xorX[11].m256i_u32[3], xorX[13].m256i_u32[3], xorX[15].m256i_u32[3]),
-		_mm256_setr_epi32 (xorX[1].m256i_u32[4], xorX[3].m256i_u32[4], xorX[5].m256i_u32[4], xorX[7].m256i_u32[4], xorX[9].m256i_u32[4], xorX[11].m256i_u32[4], xorX[13].m256i_u32[4], xorX[15].m256i_u32[4]),
-		_mm256_setr_epi32 (xorX[1].m256i_u32[5], xorX[3].m256i_u32[5], xorX[5].m256i_u32[5], xorX[7].m256i_u32[5], xorX[9].m256i_u32[5], xorX[11].m256i_u32[5], xorX[13].m256i_u32[5], xorX[15].m256i_u32[5]),
-		_mm256_setr_epi32 (xorX[1].m256i_u32[6], xorX[3].m256i_u32[6], xorX[5].m256i_u32[6], xorX[7].m256i_u32[6], xorX[9].m256i_u32[6], xorX[11].m256i_u32[6], xorX[13].m256i_u32[6], xorX[15].m256i_u32[6]),
-		_mm256_setr_epi32 (xorX[1].m256i_u32[7], xorX[3].m256i_u32[7], xorX[5].m256i_u32[7], xorX[7].m256i_u32[7], xorX[9].m256i_u32[7], xorX[11].m256i_u32[7], xorX[13].m256i_u32[7], xorX[15].m256i_u32[7]),
-	};
+	__m256i* calcX = (__m256i*) calcXBuffer;
+	calcX[0] = _mm256_i32gather_epi32 (xBase, vindex, 4);
+	calcX[1] = _mm256_i32gather_epi32 (xBase + 1, vindex, 4);
+	calcX[2] = _mm256_i32gather_epi32 (xBase + 2, vindex, 4);
+	calcX[3] = _mm256_i32gather_epi32 (xBase + 3, vindex, 4);
+	calcX[4] = _mm256_i32gather_epi32 (xBase + 4, vindex, 4);
+	calcX[5] = _mm256_i32gather_epi32 (xBase + 5, vindex, 4);
+	calcX[6] = _mm256_i32gather_epi32 (xBase + 6, vindex, 4);
+	calcX[7] = _mm256_i32gather_epi32 (xBase + 7, vindex, 4);
+
+	calcX[8] = _mm256_i32gather_epi32 (xBase + 8, vindex, 4);
+	calcX[9] = _mm256_i32gather_epi32 (xBase + 9, vindex, 4);
+	calcX[10] = _mm256_i32gather_epi32 (xBase + 10, vindex, 4);
+	calcX[11] = _mm256_i32gather_epi32 (xBase + 11, vindex, 4);
+	calcX[12] = _mm256_i32gather_epi32 (xBase + 12, vindex, 4);
+	calcX[13] = _mm256_i32gather_epi32 (xBase + 13, vindex, 4);
+	calcX[14] = _mm256_i32gather_epi32 (xBase + 14, vindex, 4);
+	calcX[15] = _mm256_i32gather_epi32 (xBase + 15, vindex, 4);
 
 //#define R(a, b) (((a) << (b)) | ((a) >> (32 - (b))))
 #define R(res, add1, add2, shift)																	 \
@@ -188,32 +193,36 @@ static void xor_salsa8_parallel8 (__m256i input[2 * 8], __m256i output[2 * 8], u
 #undef SALSA_STEP
 #undef R
 
-	//Transpose back
+	//Transpose back (extract thread results -> xX[i] = calcX[0..8].m256i_u32[i])
+	const __m256i vindex2 = _mm256_setr_epi32 (0, 8, 16, 24, 32, 40, 48, 56);
+	const int* calcXBase = (const int*) calcXBuffer;
+	//__m256i jVal = _mm256_i32gather_epi32 (calcXBase, vindex2, 4);
+
 	__m256i xX[16] = {
 		//Thread 0
-		_mm256_setr_epi32 (calcX[0].m256i_u32[0], calcX[1].m256i_u32[0], calcX[ 2].m256i_u32[0], calcX[ 3].m256i_u32[0], calcX[ 4].m256i_u32[0], calcX[ 5].m256i_u32[0], calcX[ 6].m256i_u32[0], calcX[ 7].m256i_u32[0]),
-		_mm256_setr_epi32 (calcX[8].m256i_u32[0], calcX[9].m256i_u32[0], calcX[10].m256i_u32[0], calcX[11].m256i_u32[0], calcX[12].m256i_u32[0], calcX[13].m256i_u32[0], calcX[14].m256i_u32[0], calcX[15].m256i_u32[0]),
+		_mm256_i32gather_epi32 (calcXBase + 0 * 8 + 0, vindex2, 4),
+		_mm256_i32gather_epi32 (calcXBase + 8 * 8 + 0, vindex2, 4),
 		//Thread 1
-		_mm256_setr_epi32 (calcX[0].m256i_u32[1], calcX[1].m256i_u32[1], calcX[ 2].m256i_u32[1], calcX[ 3].m256i_u32[1], calcX[ 4].m256i_u32[1], calcX[ 5].m256i_u32[1], calcX[ 6].m256i_u32[1], calcX[ 7].m256i_u32[1]),
-		_mm256_setr_epi32 (calcX[8].m256i_u32[1], calcX[9].m256i_u32[1], calcX[10].m256i_u32[1], calcX[11].m256i_u32[1], calcX[12].m256i_u32[1], calcX[13].m256i_u32[1], calcX[14].m256i_u32[1], calcX[15].m256i_u32[1]),
+		_mm256_i32gather_epi32 (calcXBase + 0 * 8 + 1, vindex2, 4),
+		_mm256_i32gather_epi32 (calcXBase + 8 * 8 + 1, vindex2, 4),
 		//Thread 2
-		_mm256_setr_epi32 (calcX[0].m256i_u32[2], calcX[1].m256i_u32[2], calcX[ 2].m256i_u32[2], calcX[ 3].m256i_u32[2], calcX[ 4].m256i_u32[2], calcX[ 5].m256i_u32[2], calcX[ 6].m256i_u32[2], calcX[ 7].m256i_u32[2]),
-		_mm256_setr_epi32 (calcX[8].m256i_u32[2], calcX[9].m256i_u32[2], calcX[10].m256i_u32[2], calcX[11].m256i_u32[2], calcX[12].m256i_u32[2], calcX[13].m256i_u32[2], calcX[14].m256i_u32[2], calcX[15].m256i_u32[2]),
+		_mm256_i32gather_epi32 (calcXBase + 0 * 8 + 2, vindex2, 4),
+		_mm256_i32gather_epi32 (calcXBase + 8 * 8 + 2, vindex2, 4),
 		//Thread 3
-		_mm256_setr_epi32 (calcX[0].m256i_u32[3], calcX[1].m256i_u32[3], calcX[ 2].m256i_u32[3], calcX[ 3].m256i_u32[3], calcX[ 4].m256i_u32[3], calcX[ 5].m256i_u32[3], calcX[ 6].m256i_u32[3], calcX[ 7].m256i_u32[3]),
-		_mm256_setr_epi32 (calcX[8].m256i_u32[3], calcX[9].m256i_u32[3], calcX[10].m256i_u32[3], calcX[11].m256i_u32[3], calcX[12].m256i_u32[3], calcX[13].m256i_u32[3], calcX[14].m256i_u32[3], calcX[15].m256i_u32[3]),
+		_mm256_i32gather_epi32 (calcXBase + 0 * 8 + 3, vindex2, 4),
+		_mm256_i32gather_epi32 (calcXBase + 8 * 8 + 3, vindex2, 4),
 		//Thread 4
-		_mm256_setr_epi32 (calcX[0].m256i_u32[4], calcX[1].m256i_u32[4], calcX[ 2].m256i_u32[4], calcX[ 3].m256i_u32[4], calcX[ 4].m256i_u32[4], calcX[ 5].m256i_u32[4], calcX[ 6].m256i_u32[4], calcX[ 7].m256i_u32[4]),
-		_mm256_setr_epi32 (calcX[8].m256i_u32[4], calcX[9].m256i_u32[4], calcX[10].m256i_u32[4], calcX[11].m256i_u32[4], calcX[12].m256i_u32[4], calcX[13].m256i_u32[4], calcX[14].m256i_u32[4], calcX[15].m256i_u32[4]),
+		_mm256_i32gather_epi32 (calcXBase + 0 * 8 + 4, vindex2, 4),
+		_mm256_i32gather_epi32 (calcXBase + 8 * 8 + 4, vindex2, 4),
 		//Thread 5
-		_mm256_setr_epi32 (calcX[0].m256i_u32[5], calcX[1].m256i_u32[5], calcX[ 2].m256i_u32[5], calcX[ 3].m256i_u32[5], calcX[ 4].m256i_u32[5], calcX[ 5].m256i_u32[5], calcX[ 6].m256i_u32[5], calcX[ 7].m256i_u32[5]),
-		_mm256_setr_epi32 (calcX[8].m256i_u32[5], calcX[9].m256i_u32[5], calcX[10].m256i_u32[5], calcX[11].m256i_u32[5], calcX[12].m256i_u32[5], calcX[13].m256i_u32[5], calcX[14].m256i_u32[5], calcX[15].m256i_u32[5]),
+		_mm256_i32gather_epi32 (calcXBase + 0 * 8 + 5, vindex2, 4),
+		_mm256_i32gather_epi32 (calcXBase + 8 * 8 + 5, vindex2, 4),
 		//Thread 6
-		_mm256_setr_epi32 (calcX[0].m256i_u32[6], calcX[1].m256i_u32[6], calcX[ 2].m256i_u32[6], calcX[ 3].m256i_u32[6], calcX[ 4].m256i_u32[6], calcX[ 5].m256i_u32[6], calcX[ 6].m256i_u32[6], calcX[ 7].m256i_u32[6]),
-		_mm256_setr_epi32 (calcX[8].m256i_u32[6], calcX[9].m256i_u32[6], calcX[10].m256i_u32[6], calcX[11].m256i_u32[6], calcX[12].m256i_u32[6], calcX[13].m256i_u32[6], calcX[14].m256i_u32[6], calcX[15].m256i_u32[6]),
+		_mm256_i32gather_epi32 (calcXBase + 0 * 8 + 6, vindex2, 4),
+		_mm256_i32gather_epi32 (calcXBase + 8 * 8 + 6, vindex2, 4),
 		//Thread 7
-		_mm256_setr_epi32 (calcX[0].m256i_u32[7], calcX[1].m256i_u32[7], calcX[ 2].m256i_u32[7], calcX[ 3].m256i_u32[7], calcX[ 4].m256i_u32[7], calcX[ 5].m256i_u32[7], calcX[ 6].m256i_u32[7], calcX[ 7].m256i_u32[7]),
-		_mm256_setr_epi32 (calcX[8].m256i_u32[7], calcX[9].m256i_u32[7], calcX[10].m256i_u32[7], calcX[11].m256i_u32[7], calcX[12].m256i_u32[7], calcX[13].m256i_u32[7], calcX[14].m256i_u32[7], calcX[15].m256i_u32[7]),
+		_mm256_i32gather_epi32 (calcXBase + 0 * 8 + 7, vindex2, 4),
+		_mm256_i32gather_epi32 (calcXBase + 8 * 8 + 7, vindex2, 4)
 	};
 
 	//Calculate output
