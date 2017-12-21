@@ -101,7 +101,7 @@ static void PBKDF2_SHA256_128_32 (uint32_t *tstate, uint32_t *ostate,
 		output[i] = swab32 (ostate[i]);
 }
 
-ALIGN_PREFIX (32) static uint32_t calcXBuffer[16 * 8] ALIGN_POSTFIX (32);
+ALIGN_PREFIX (32) static uint32_t speedupSalsaCalcXBuffer[16 * 8] ALIGN_POSTFIX (32);
 
 static void xor_salsa8_parallel8 (__m256i input[2 * 8], __m256i output[2 * 8], uint32_t threadLen) {
 	//8x input[0] -> x00..08 (xorX[thread*2 + 0]), input[1] -> x09..x15 (xorX[thread*2 + 1])
@@ -136,7 +136,7 @@ static void xor_salsa8_parallel8 (__m256i input[2 * 8], __m256i output[2 * 8], u
 	const __m256i vindex = _mm256_setr_epi32 (0, threadLen * 8, 2 * threadLen * 8, 3 * threadLen * 8, 4 * threadLen * 8, 5 * threadLen * 8, 6 * threadLen * 8, 7 * threadLen * 8);
 	const int* xBase = (const int*) output;
 
-	__m256i* calcX = (__m256i*) calcXBuffer;
+	__m256i* calcX = (__m256i*) speedupSalsaCalcXBuffer;
 	calcX[0] = _mm256_i32gather_epi32 (xBase, vindex, 4);
 	calcX[1] = _mm256_i32gather_epi32 (xBase + 1, vindex, 4);
 	calcX[2] = _mm256_i32gather_epi32 (xBase + 2, vindex, 4);
@@ -195,7 +195,7 @@ static void xor_salsa8_parallel8 (__m256i input[2 * 8], __m256i output[2 * 8], u
 
 	//Transpose back (extract thread results -> xX[i] = calcX[0..8].m256i_u32[i])
 	const __m256i vindex2 = _mm256_setr_epi32 (0, 8, 16, 24, 32, 40, 48, 56);
-	const int* calcXBase = (const int*) calcXBuffer;
+	const int* calcXBase = (const int*) speedupSalsaCalcXBuffer;
 	//__m256i jVal = _mm256_i32gather_epi32 (calcXBase, vindex2, 4);
 
 	__m256i xX[16] = {
