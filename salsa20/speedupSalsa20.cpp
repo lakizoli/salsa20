@@ -17,6 +17,9 @@ static inline uint32_t swab32 (uint32_t v) {
 extern "C" {
 	void sha256_init (uint32_t *state);
 	void sha256_transform (uint32_t *state, const uint32_t *block, int swap);
+
+	void sha256_init_avx (uint32_t *state);
+	void sha256_transform_avx (uint32_t *state, const uint32_t *block, int swap);
 }
 
 //static const uint32_t keypad[12] = {
@@ -152,7 +155,7 @@ static void PBKDF2_SHA256_128_32 (uint32_t *tstate, uint32_t *ostate, const uint
 		0x0f, 0x0e, 0x0d, 0x0c
 	);
 
-	*(__m256i*) output = _mm256_shuffle_epi8 (*(__m256i*)ostate, swab);
+	_mm256_storeu_si256 ((__m256i*) output, _mm256_shuffle_epi8 (*(__m256i*)ostate, swab));
 }
 
 ALIGN_PREFIX (32) static uint32_t speedupSalsaCalcXBuffer[16 * 8];

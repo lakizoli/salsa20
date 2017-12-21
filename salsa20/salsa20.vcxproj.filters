@@ -7,9 +7,11 @@
     <ClCompile Include="speedupSalsa20.cpp" />
     <ClCompile Include="checkfiles.cpp" />
     <ClCompile Include="sha2.c" />
+    <ClCompile Include="sha2avx2.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="defs.h" />
     <ClInclude Include="ScopedClock.hpp" />
+    <ClInclude Include="alignedallocator.h" />
   </ItemGroup>
 </Project>

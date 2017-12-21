@@ -1,5 +1,6 @@
 #include "defs.h"
 #include "ScopedClock.hpp"
+#include "alignedallocator.h"
 #include <functional>
 #include <fstream>
 #include <vector>
@@ -33,7 +34,7 @@ int RunCipher (const string& tag, const string& source, const string& target, si
 		++chunkCount;
 	}
 
-	vector<uint8_t> buffer (chunkCount * inputChunkLen);
+	vector<uint8_t, AlignedAllocator<uint8_t, Alignment::AVX>> buffer (chunkCount * inputChunkLen);
 	inFile.read ((char*) &buffer[0], len);
 	if (!inFile) {
 		return ERROR;
@@ -48,7 +49,7 @@ int RunCipher (const string& tag, const string& source, const string& target, si
 
 	//Run cipher
 	const size_t outputChunkLen = targetIntegerCount * sizeof (uint32_t);
-	vector<uint8_t> outputBuffer (chunkCount * outputChunkLen);
+	vector<uint8_t, AlignedAllocator<uint8_t, Alignment::AVX>> outputBuffer (chunkCount * outputChunkLen);
 
 	{
 		ScopedClock clk ("cipher: " + tag, "hash", chunkCount);
