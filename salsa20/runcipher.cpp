@@ -8,8 +8,7 @@
 using namespace std;
 
 int RunCipher (const string& tag, const string& source, const string& target, size_t sourceIntegerCount, size_t targetIntegerCount,
-	function<uint32_t ()> initCypher, function<void ()> releaseCypher,
-	function<void (uint32_t stepCount, const uint32_t* input, uint32_t* output, size_t sourceIntegerCount, size_t targetIntegerCount)> cipher)
+	function<uint32_t ()> initCypher, function<void ()> releaseCypher, function<void (const uint32_t* input, uint32_t* output)> cipher)
 {
 	//Read whole input to the memory
 	ifstream inFile (source, ios::in | ios::binary);
@@ -64,11 +63,11 @@ int RunCipher (const string& tag, const string& source, const string& target, si
 					size_t residualStepCount = chunkCount - i;
 					memcpy (&lastInputBuffer[0], &buffer[i * inputChunkLen], residualStepCount * inputChunkLen);
 
-					cipher (stepCount, (const uint32_t*) &lastInputBuffer[0], (uint32_t*) &lastOutputBuffer[0], sourceIntegerCount, targetIntegerCount);
+					cipher ((const uint32_t*) &lastInputBuffer[0], (uint32_t*) &lastOutputBuffer[0]);
 
 					memcpy (&outputBuffer[i * outputChunkLen], &lastOutputBuffer[0], residualStepCount * outputChunkLen);
 				} else { //All subsequent steps
-					cipher (stepCount, (const uint32_t*) &buffer[i * inputChunkLen], (uint32_t*) &outputBuffer[i * outputChunkLen], sourceIntegerCount, targetIntegerCount);
+					cipher ((const uint32_t*) &buffer[i * inputChunkLen], (uint32_t*) &outputBuffer[i * outputChunkLen]);
 				}
 			}
 		}

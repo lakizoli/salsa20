@@ -5,7 +5,7 @@
 
 #define ALIGN_PREFIX(x) __declspec(align(x))
 
-#define SCRYPT_STEP_COUNT 8
+#define SCRYPT_THREAD_COUNT 8
 
 extern "C" {
 	void sha256_transform_avx (__m256i state[1], const __m256i block[2], int swap);
@@ -152,9 +152,10 @@ static void PBKDF2_SHA256_128_32 (__m256i& tstate, __m256i& ostate, const __m256
 	*(__m256i*) output =  _mm256_shuffle_epi8 (ostate, swab);
 }
 
-ALIGN_PREFIX (32) static uint32_t speedupSalsaCalcXBuffer[16 * 8];
+static __m256i speedupSalsaCalcX1[16];
+static __m256i speedupSalsaCalcX2[16];
 
-static void xor_salsa8_parallel8 (__m256i input[2 * 8], __m256i output[2 * 8], uint32_t threadLen) {
+static void xor_salsa8_parallel (__m256i input[2 * SCRYPT_THREAD_COUNT], __m256i output[2 * SCRYPT_THREAD_COUNT], uint32_t threadLen) {
 	//8x input[0] -> x00..08 (xorX[thread*2 + 0]), input[1] -> x09..x15 (xorX[thread*2 + 1])
 	//__m256i xorX[16] = {
 		//thread 0
@@ -187,67 +188,64 @@ static void xor_salsa8_parallel8 (__m256i input[2 * 8], __m256i output[2 * 8], u
 	const __m256i vindex = _mm256_setr_epi32 (0, threadLen * 8, 2 * threadLen * 8, 3 * threadLen * 8, 4 * threadLen * 8, 5 * threadLen * 8, 6 * threadLen * 8, 7 * threadLen * 8);
 	const int* xBase = (const int*) output;
 
-	__m256i* calcX = (__m256i*) speedupSalsaCalcXBuffer;
-	calcX[0] = _mm256_i32gather_epi32 (xBase, vindex, 4);
-	calcX[1] = _mm256_i32gather_epi32 (xBase + 1, vindex, 4);
-	calcX[2] = _mm256_i32gather_epi32 (xBase + 2, vindex, 4);
-	calcX[3] = _mm256_i32gather_epi32 (xBase + 3, vindex, 4);
-	calcX[4] = _mm256_i32gather_epi32 (xBase + 4, vindex, 4);
-	calcX[5] = _mm256_i32gather_epi32 (xBase + 5, vindex, 4);
-	calcX[6] = _mm256_i32gather_epi32 (xBase + 6, vindex, 4);
-	calcX[7] = _mm256_i32gather_epi32 (xBase + 7, vindex, 4);
+	speedupSalsaCalcX1[0] = _mm256_i32gather_epi32 (xBase, vindex, 4);
+	speedupSalsaCalcX1[1] = _mm256_i32gather_epi32 (xBase + 1, vindex, 4);
+	speedupSalsaCalcX1[2] = _mm256_i32gather_epi32 (xBase + 2, vindex, 4);
+	speedupSalsaCalcX1[3] = _mm256_i32gather_epi32 (xBase + 3, vindex, 4);
+	speedupSalsaCalcX1[4] = _mm256_i32gather_epi32 (xBase + 4, vindex, 4);
+	speedupSalsaCalcX1[5] = _mm256_i32gather_epi32 (xBase + 5, vindex, 4);
+	speedupSalsaCalcX1[6] = _mm256_i32gather_epi32 (xBase + 6, vindex, 4);
+	speedupSalsaCalcX1[7] = _mm256_i32gather_epi32 (xBase + 7, vindex, 4);
 
-	calcX[8] = _mm256_i32gather_epi32 (xBase + 8, vindex, 4);
-	calcX[9] = _mm256_i32gather_epi32 (xBase + 9, vindex, 4);
-	calcX[10] = _mm256_i32gather_epi32 (xBase + 10, vindex, 4);
-	calcX[11] = _mm256_i32gather_epi32 (xBase + 11, vindex, 4);
-	calcX[12] = _mm256_i32gather_epi32 (xBase + 12, vindex, 4);
-	calcX[13] = _mm256_i32gather_epi32 (xBase + 13, vindex, 4);
-	calcX[14] = _mm256_i32gather_epi32 (xBase + 14, vindex, 4);
-	calcX[15] = _mm256_i32gather_epi32 (xBase + 15, vindex, 4);
+	speedupSalsaCalcX1[8] = _mm256_i32gather_epi32 (xBase + 8, vindex, 4);
+	speedupSalsaCalcX1[9] = _mm256_i32gather_epi32 (xBase + 9, vindex, 4);
+	speedupSalsaCalcX1[10] = _mm256_i32gather_epi32 (xBase + 10, vindex, 4);
+	speedupSalsaCalcX1[11] = _mm256_i32gather_epi32 (xBase + 11, vindex, 4);
+	speedupSalsaCalcX1[12] = _mm256_i32gather_epi32 (xBase + 12, vindex, 4);
+	speedupSalsaCalcX1[13] = _mm256_i32gather_epi32 (xBase + 13, vindex, 4);
+	speedupSalsaCalcX1[14] = _mm256_i32gather_epi32 (xBase + 14, vindex, 4);
+	speedupSalsaCalcX1[15] = _mm256_i32gather_epi32 (xBase + 15, vindex, 4);
 
 //#define R(a, b) (((a) << (b)) | ((a) >> (32 - (b))))
-#define R(res, add1, add2, shift)																	 \
-		calcX[res] = _mm256_xor_si256 (																 \
-			calcX[res],																				 \
-			_mm256_or_si256 (																		 \
-				_mm256_slli_epi32 (_mm256_add_epi32 (calcX[add1], calcX[add2]), shift),				 \
-				_mm256_srli_epi32 (_mm256_add_epi32 (calcX[add1], calcX[add2]), 32 - shift)			 \
-			)																						 \
+#define R(calcX, res, add1, add2, shift)															\
+		calcX[res] = _mm256_xor_si256 (																\
+			calcX[res],																				\
+			_mm256_or_si256 (																		\
+				_mm256_slli_epi32 (_mm256_add_epi32 (calcX[add1], calcX[add2]), shift),				\
+				_mm256_srli_epi32 (_mm256_add_epi32 (calcX[add1], calcX[add2]), 32 - shift)			\
+			)																						\
 		)
 
-#define SALSA_STEP	{																				\
-		R (4, 0, 12, 7);	R (9, 5, 1, 7);															\
-		R (14, 10, 6, 7);	R (3, 15, 11, 7);														\
-		R (8, 4, 0, 9);		R (13, 9, 5, 9);														\
-		R (2, 14, 10, 9);	R (7, 3, 15, 9);														\
-		R (12, 8, 4, 13);	R (1, 13, 9, 13);														\
-		R (6, 2, 14, 13);	R (11, 7, 3, 13);														\
-		R (0, 12, 8, 18);	R (5, 1, 13, 18);														\
-		R (10, 6, 2, 18);	R (15, 11, 7, 18);														\
-																									\
-		R (1, 0, 3, 7);		R (6, 5, 4, 7);															\
-		R (11, 10, 9, 7);	R (12, 15, 14, 7);														\
-		R (2, 1, 0, 9);		R (7, 6, 5, 9);															\
-		R (8, 11, 10, 9);	R (13, 12, 15, 9);														\
-		R (3, 2, 1, 13);	R (4, 7, 6, 13);														\
-		R (9, 8, 11, 13);	R (14, 13, 12, 13);														\
-		R (0, 3, 2, 18);	R (5, 4, 7, 18);														\
-		R (10, 9, 8, 18);	R (15, 14, 13, 18);														\
-	}
+#define SALSA_STEP(calcX)													\
+		R (calcX, 4, 0, 12, 7);		R (calcX, 9, 5, 1, 7);					\
+		R (calcX, 14, 10, 6, 7);	R (calcX, 3, 15, 11, 7);				\
+		R (calcX, 8, 4, 0, 9);		R (calcX, 13, 9, 5, 9);					\
+		R (calcX, 2, 14, 10, 9);	R (calcX, 7, 3, 15, 9);					\
+		R (calcX, 12, 8, 4, 13);	R (calcX, 1, 13, 9, 13);				\
+		R (calcX, 6, 2, 14, 13);	R (calcX, 11, 7, 3, 13);				\
+		R (calcX, 0, 12, 8, 18);	R (calcX, 5, 1, 13, 18);				\
+		R (calcX, 10, 6, 2, 18);	R (calcX, 15, 11, 7, 18);				\
+																			\
+		R (calcX, 1, 0, 3, 7);		R (calcX, 6, 5, 4, 7);					\
+		R (calcX, 11, 10, 9, 7);	R (calcX, 12, 15, 14, 7);				\
+		R (calcX, 2, 1, 0, 9);		R (calcX, 7, 6, 5, 9);					\
+		R (calcX, 8, 11, 10, 9);	R (calcX, 13, 12, 15, 9);				\
+		R (calcX, 3, 2, 1, 13);		R (calcX, 4, 7, 6, 13);					\
+		R (calcX, 9, 8, 11, 13);	R (calcX, 14, 13, 12, 13);				\
+		R (calcX, 0, 3, 2, 18);		R (calcX, 5, 4, 7, 18);					\
+		R (calcX, 10, 9, 8, 18);	R (calcX, 15, 14, 13, 18);
 
-	SALSA_STEP;
-	SALSA_STEP;
-	SALSA_STEP;
-	SALSA_STEP;
+	SALSA_STEP (speedupSalsaCalcX1);
+	SALSA_STEP (speedupSalsaCalcX1);
+	SALSA_STEP (speedupSalsaCalcX1);
+	SALSA_STEP (speedupSalsaCalcX1);
 
 #undef SALSA_STEP
 #undef R
 
 	//Transpose back (extract thread results -> xX[i] = calcX[0..8].m256i_u32[i])
 	const __m256i vindex2 = _mm256_setr_epi32 (0, 8, 16, 24, 32, 40, 48, 56);
-	const int* calcXBase = (const int*) speedupSalsaCalcXBuffer;
-	//__m256i jVal = _mm256_i32gather_epi32 (calcXBase, vindex2, 4);
+	const int* calcXBase = (const int*) speedupSalsaCalcX1;
 
 	__m256i xX[16] = {
 		//Thread 0
@@ -303,31 +301,30 @@ static void xor_salsa8_parallel8 (__m256i input[2 * 8], __m256i output[2 * 8], u
 	output[7*threadLen + 1] = _mm256_add_epi32 (output[7*threadLen + 1], xX[15]);
 }
 
-ALIGN_PREFIX (32) static uint32_t speedupScryptV[1024 * 32 * SCRYPT_STEP_COUNT];
+static __m256i speedupScryptV[1024 * 4 * SCRYPT_THREAD_COUNT];
 
-static void scrypt_core (uint32_t* X) {
+static void scrypt_core (__m256i X[4 * SCRYPT_THREAD_COUNT]) {
+
+#define CORE1_PRE_STEP(step, i)				 				\
+		XPtr = &X[step * 4];								\
+		VPtr = &speedupScryptV[(step * N + i) * 4];			\
+		VPtr[0] = XPtr[0];									\
+		VPtr[1] = XPtr[1];									\
+		VPtr[2] = XPtr[2];									\
+		VPtr[3] = XPtr[3];
+
+#define CORE2_PRE_STEP(step) 										\
+		j = 4 * (X[step * 4 + 2].m256i_u32[0] & (N - 1));			\
+		XPtr = &X[step * 4];										\
+		VPtr = &speedupScryptV[step * N * 4 + j];					\
+		XPtr[0] = _mm256_xor_si256 (XPtr[0], VPtr[0]);				\
+		XPtr[1] = _mm256_xor_si256 (XPtr[1], VPtr[1]);				\
+		XPtr[2] = _mm256_xor_si256 (XPtr[2], VPtr[2]);				\
+		XPtr[3] = _mm256_xor_si256 (XPtr[3], VPtr[3]);
+
 	const int32_t N = 1024;
-
-#define CORE1_PRE_STEP(step, i) { 											 \
-		__m256i* srcX = (__m256i*) &X[step * 32];							 \
-		__m256i* destV = (__m256i*) &speedupScryptV[step * N * 32 + i * 32]; \
-																			 \
-		_mm256_store_si256 (destV++, srcX[0]);								 \
-		_mm256_store_si256 (destV++, srcX[1]);								 \
-		_mm256_store_si256 (destV++, srcX[2]);								 \
-		_mm256_store_si256 (destV, srcX[3]);								 \
-	}
-
-#define CORE2_PRE_STEP(step) {												 \
-		uint32_t j = 32 * (X[step * 32 + 16] & (N - 1));					 \
-																			 \
-		__m256i* srcV = (__m256i*) &speedupScryptV[step * N * 32 + j];		 \
-		__m256i* destX = (__m256i*) &X[step * 32];							 \
-		destX[0] = _mm256_xor_si256 (destX[0], *srcV++);					 \
-		destX[1] = _mm256_xor_si256 (destX[1], *srcV++);					 \
-		destX[2] = _mm256_xor_si256 (destX[2], *srcV++);					 \
-		destX[3] = _mm256_xor_si256 (destX[3], *srcV);						 \
-	}
+	__m256i* XPtr;
+	__m256i* VPtr;
 
 	for (uint32_t i = 0; i < N; i++) {
 		CORE1_PRE_STEP (0, i);
@@ -339,12 +336,13 @@ static void scrypt_core (uint32_t* X) {
 		CORE1_PRE_STEP (6, i);
 		CORE1_PRE_STEP (7, i);
 
-		__m256i* srcX = (__m256i*) &X[0 * 32];
-		xor_salsa8_parallel8 (&srcX[2], &srcX[0], 4);
-		xor_salsa8_parallel8 (&srcX[0], &srcX[2], 4);
+		xor_salsa8_parallel (&X[2], &X[0], 4);
+		xor_salsa8_parallel (&X[0], &X[2], 4);
 	}
 
 	for (uint32_t i = 0; i < N; i++) {
+		uint32_t j;
+
 		CORE2_PRE_STEP (0);
 		CORE2_PRE_STEP (1);
 		CORE2_PRE_STEP (2);
@@ -354,21 +352,19 @@ static void scrypt_core (uint32_t* X) {
 		CORE2_PRE_STEP (6);
 		CORE2_PRE_STEP (7);
 
-		__m256i* destX = (__m256i*) &X[0 * 32];
-		xor_salsa8_parallel8 (&destX[2], &destX[0], 4);
-		xor_salsa8_parallel8 (&destX[0], &destX[2], 4);
+		xor_salsa8_parallel (&X[2], &X[0], 4);
+		xor_salsa8_parallel (&X[0], &X[2], 4);
 	}
 
 #undef CORE1_STEP
 #undef CORE2_STEP
 }
 
-static void scrypt_1024_1_1_256 (uint32_t stepCount, const uint32_t *input, uint32_t *output, const __m256i midstate[8]) {
-	__m256i ostate[SCRYPT_STEP_COUNT];
-	__m256i X[4 * SCRYPT_STEP_COUNT];
+static void scrypt_1024_1_1_256 (const uint32_t *input, uint32_t *output, const __m256i midstate[8]) {
+	__m256i ostate[SCRYPT_THREAD_COUNT];
+	__m256i X[4 * SCRYPT_THREAD_COUNT];
 
-	//memcpy (tstate, midstate, 32 * SCRYPT_STEP_COUNT);
-	__m256i tstate[SCRYPT_STEP_COUNT] = {
+	__m256i tstate[SCRYPT_THREAD_COUNT] = {
 		midstate[0], midstate[1], midstate[2], midstate[3], midstate[4], midstate[5], midstate[6], midstate[7]
 	};
 
@@ -390,7 +386,7 @@ static void scrypt_1024_1_1_256 (uint32_t stepCount, const uint32_t *input, uint
 	PBKDF2_SHA256_80_128 (tstate[6], ostate[6], &input[6 * 20], &X[6 * 4]);
 	PBKDF2_SHA256_80_128 (tstate[7], ostate[7], &input[7 * 20], &X[7 * 4]);
 
-	scrypt_core ((uint32_t*) X);
+	scrypt_core (X);
 
 	PBKDF2_SHA256_128_32 (tstate[0], ostate[0], &X[0 * 4], &output[0 * 8]);
 	PBKDF2_SHA256_128_32 (tstate[1], ostate[1], &X[1 * 4], &output[1 * 8]);
@@ -405,14 +401,14 @@ static void scrypt_1024_1_1_256 (uint32_t stepCount, const uint32_t *input, uint
 //Speedup cypher caller
 
 uint32_t initSpeedupCypher () {
-	return SCRYPT_STEP_COUNT; //Step count
+	return SCRYPT_THREAD_COUNT; //Step count
 }
 
 void releaseSpeedupCypher () {
 }
 
-void speedupCypher (uint32_t stepCount, const uint32_t* input, uint32_t* output, size_t sourceIntegerCount, size_t targetIntegerCount) {
-	ALIGN_PREFIX (32) uint32_t midstate[8 * SCRYPT_STEP_COUNT] = { 1, 2, 3, 4, 5, 6, 7, 8,
+void speedupCypher (const uint32_t* input, uint32_t* output) {
+	ALIGN_PREFIX (32) uint32_t midstate[8 * SCRYPT_THREAD_COUNT] = { 1, 2, 3, 4, 5, 6, 7, 8,
 		1, 2, 3, 4, 5, 6, 7, 8,
 		1, 2, 3, 4, 5, 6, 7, 8,
 		1, 2, 3, 4, 5, 6, 7, 8,
@@ -421,7 +417,7 @@ void speedupCypher (uint32_t stepCount, const uint32_t* input, uint32_t* output,
 		1, 2, 3, 4, 5, 6, 7, 8,
 		1, 2, 3, 4, 5, 6, 7, 8 }; //test values
 
-	scrypt_1024_1_1_256 (stepCount, input, output, (const __m256i*) midstate);
+	scrypt_1024_1_1_256 (input, output, (const __m256i*) midstate);
 
 	////TEST
 	//FILE* fout = fopen ("d:\\work\\salsa2\\new.dat", "ab"); //"wb" to delete content

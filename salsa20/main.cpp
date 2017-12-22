@@ -12,16 +12,16 @@ using namespace std;
 extern "C" {
 	uint32_t initReferenceCypher ();
 	void releaseReferenceCypher ();
-	void referenceCypher (uint32_t stepCount, const uint32_t* input, uint32_t* output, size_t sourceIntegerCount, size_t targetIntegerCount);
+	void referenceCypher (const uint32_t* input, uint32_t* output);
 }
 
 extern uint32_t initSpeedupCypher ();
 extern void releaseSpeedupCypher ();
-extern void speedupCypher (uint32_t stepCount, const uint32_t* input, uint32_t* output, size_t sourceIntegerCount, size_t targetIntegerCount);
+extern void speedupCypher (const uint32_t* input, uint32_t* output);
 
 extern int RunCipher (const string& tag, const string& source, const string& target, size_t sourceIntegerCount, size_t targetIntegerCount,
 	function<uint32_t ()> initCypher, function<void ()> releaseCypher,
-	function<void (uint32_t stepCount, const uint32_t* input, uint32_t* output, size_t sourceIntegerCount, size_t targetIntegerCount)> cipher);
+	function<void (const uint32_t* input, uint32_t* output)> cipher);
 
 extern int HasSameContent (const string& file1, const string& file2, bool& same);
 
@@ -50,8 +50,8 @@ int main (int argc, char* argv[]) {
 		[] () -> void {
 			releaseReferenceCypher ();
 		},
-		[] (uint32_t stepCount, const uint32_t* input, uint32_t* output, size_t sourceIntegerCount, size_t targetIntegerCount) -> void {
-			referenceCypher (stepCount, input, output, sourceIntegerCount, targetIntegerCount);
+		[] (const uint32_t* input, uint32_t* output) -> void {
+			referenceCypher (input, output);
 		});
 	if (resCode != SUCCESS) {
 		cout << "Error occured!" << endl;
@@ -68,8 +68,8 @@ int main (int argc, char* argv[]) {
 		[] () -> void {
 			releaseSpeedupCypher ();
 		},
-		[] (uint32_t stepCount, const uint32_t* input, uint32_t* output, size_t sourceIntegerCount, size_t targetIntegerCount) -> void {
-			speedupCypher (stepCount, input, output, sourceIntegerCount, targetIntegerCount);
+		[] (const uint32_t* input, uint32_t* output) -> void {
+			speedupCypher (input, output);
 		});
 	if (resCode != SUCCESS) {
 		cout << "Error occured!" << endl;
