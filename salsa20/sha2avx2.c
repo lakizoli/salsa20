@@ -14,6 +14,9 @@
 #include <string.h>
 #include <inttypes.h>
 #include <stdlib.h>
+#include <intrin.h>
+
+#define ALIGN_PREFIX(x) __declspec(align(x))
 
 static inline uint32_t swab32 (uint32_t v) {
 	return _byteswap_ulong (v);
@@ -55,10 +58,10 @@ static inline void le32enc (void *pp, uint32_t x) {
 }
 #endif
 
-static const uint32_t sha256_h[8] = {
-	0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-	0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
-};
+//static const uint32_t sha256_h[8] = {
+//	0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+//	0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+//};
 
 static const uint32_t sha256_k[64] = {
 	0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
@@ -79,10 +82,10 @@ static const uint32_t sha256_k[64] = {
 	0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
 };
 
-void sha256_init_avx(uint32_t *state)
-{
-	memcpy(state, sha256_h, 32);
-}
+//void sha256_init_avx(uint32_t *state)
+//{
+//	memcpy(state, sha256_h, 32);
+//}
 
 /* Elementary functions used by SHA256 */
 #define Ch(x, y, z)     ((x & (y ^ z)) ^ z)
@@ -114,17 +117,32 @@ void sha256_init_avx(uint32_t *state)
  * SHA256 block compression function.  The 256-bit state is transformed via
  * the 512-bit input block to produce a new state.
  */
-void sha256_transform_avx(uint32_t *state, const uint32_t *block, int swap)
+void sha256_transform_avx(__m256i state[1], const __m256i block[2], int swap)
 {
-	uint32_t W[64];
-	uint32_t S[8];
+	ALIGN_PREFIX (32) uint32_t W[64];
+	ALIGN_PREFIX (32) uint32_t S[8];
 	uint32_t t0, t1;
 	int i;
 
 	/* 1. Prepare message schedule W. */
 	if (swap) {
-		for (i = 0; i < 16; i++)
-			W[i] = swab32(block[i]);
+		//for (i = 0; i < 16; i++)
+		//	W[i] = swab32 (block[i]);
+
+		__m256i swab = _mm256_setr_epi8 (
+			0x03, 0x02, 0x01, 0x00,
+			0x07, 0x06, 0x05, 0x04,
+			0x0b, 0x0a, 0x09, 0x08,
+			0x0f, 0x0e, 0x0d, 0x0c,
+
+			0x03, 0x02, 0x01, 0x00,
+			0x07, 0x06, 0x05, 0x04,
+			0x0b, 0x0a, 0x09, 0x08,
+			0x0f, 0x0e, 0x0d, 0x0c
+		);
+
+		((__m256i*)W)[0] = _mm256_shuffle_epi8 (block[0], swab);
+		((__m256i*)W)[1] = _mm256_shuffle_epi8 (block[1], swab);
 	} else
 		memcpy(W, block, 64);
 	for (i = 16; i < 64; i += 2) {
@@ -133,7 +151,8 @@ void sha256_transform_avx(uint32_t *state, const uint32_t *block, int swap)
 	}
 
 	/* 2. Initialize working variables. */
-	memcpy(S, state, 32);
+	//memcpy(S, state, 32);
+	*(__m256i*)S = *state;
 
 	/* 3. Mix. */
 	RNDr(S, W,  0);
@@ -202,8 +221,9 @@ void sha256_transform_avx(uint32_t *state, const uint32_t *block, int swap)
 	RNDr(S, W, 63);
 
 	/* 4. Mix local working variables into global state */
-	for (i = 0; i < 8; i++)
-		state[i] += S[i];
+	//for (i = 0; i < 8; i++)
+	//	state[i] += S[i];
+	*state = _mm256_add_epi32 (*state, *(__m256i*)S);
 }
 
 //static const uint32_t sha256d_hash1[16] = {

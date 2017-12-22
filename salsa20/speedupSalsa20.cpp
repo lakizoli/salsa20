@@ -2,79 +2,70 @@
 
 #include <stdint.h>
 #include <intrin.h>
-#include <cstring>
-#include <cassert>
-#include <cstdio>
 
 #define ALIGN_PREFIX(x) __declspec(align(x))
 
 #define SCRYPT_STEP_COUNT 8
 
-static inline uint32_t swab32 (uint32_t v) {
-	return _byteswap_ulong (v);
-}
-
 extern "C" {
-	void sha256_init (uint32_t *state);
-	void sha256_transform (uint32_t *state, const uint32_t *block, int swap);
-
-	void sha256_init_avx (uint32_t *state);
-	void sha256_transform_avx (uint32_t *state, const uint32_t *block, int swap);
+	void sha256_transform_avx (__m256i state[1], const __m256i block[2], int swap);
 }
 
-//static const uint32_t keypad[12] = {
-//	0x80000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x00000280
-//};
-//static const uint32_t innerpad[11] = {
-//	0x80000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x000004a0
-//};
-//static const uint32_t outerpad[8] = {
-//	0x80000000, 0, 0, 0, 0, 0, 0, 0x00000300
-//};
-static const uint32_t finalblk[16] = {
-	0x00000001, 0x80000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x00000620
-};
+#define sha256_init_avx()											\
+	_mm256_setr_epi32 (												\
+		0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,				\
+		0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19				\
+	)
 
-static inline void HMAC_SHA256_80_init (const uint32_t *key, uint32_t *tstate, uint32_t *ostate) {
-	ALIGN_PREFIX (32) uint32_t pad[16] = {
-		key[16], key[17], key[18], key[19],
-		0x80000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x00000280 //keypad
+static inline void HMAC_SHA256_80_init (const uint32_t *key, __m256i& tstate, __m256i& ostate) {
+	__m256i pad[2] = {
+		_mm256_setr_epi32 (
+			key[16], key[17], key[18], key[19],
+			0x80000000, 0, 0, 0 //keypad head
+		), _mm256_setr_epi32 (
+			0, 0, 0, 0, 0, 0, 0, 0x00000280 //keypad tail
+		)
 	};
 
 	/* tstate is assumed to contain the midstate of key */
-	sha256_transform (tstate, pad, 0);
+	sha256_transform_avx (&tstate, pad, 0);
 	
-	const __m256i ihash = _mm256_loadu_si256 ((const __m256i*) tstate);
+	const __m256i ihash = tstate;
 
-	sha256_init (ostate);
-	((__m256i*)pad)[0] = _mm256_xor_si256 (ihash, _mm256_set1_epi32 (0x5c5c5c5c));
-	((__m256i*)pad)[1] = _mm256_set1_epi32 (0x5c5c5c5c);
-	sha256_transform (ostate, pad, 0);
+	ostate = sha256_init_avx ();
+	pad[0] = _mm256_xor_si256 (ihash, _mm256_set1_epi32 (0x5c5c5c5c));
+	pad[1] = _mm256_set1_epi32 (0x5c5c5c5c);
+	sha256_transform_avx (&ostate, pad, 0);
 
-	sha256_init (tstate);
-	((__m256i*)pad)[0] = _mm256_xor_si256 (ihash, _mm256_set1_epi32 (0x36363636));
-	((__m256i*)pad)[1] = _mm256_set1_epi32 (0x36363636);
-	sha256_transform (tstate, pad, 0);
+	tstate = sha256_init_avx ();
+	pad[0] = _mm256_xor_si256 (ihash, _mm256_set1_epi32 (0x36363636));
+	pad[1] = _mm256_set1_epi32 (0x36363636);
+	sha256_transform_avx (&tstate, pad, 0);
 }
 
-static void PBKDF2_SHA256_80_128 (const uint32_t *tstate, const uint32_t *ostate, const uint32_t *salt, uint32_t *output) {
-	ALIGN_PREFIX (32) uint32_t istate[8];
-	ALIGN_PREFIX (32) uint32_t ostate2[8];
-	ALIGN_PREFIX (32) uint32_t ibuf[16] = {
-		0, 0, 0, 0, 0,
-		0x80000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x000004a0 //innerpad
-	};
-	ALIGN_PREFIX (32) uint32_t obuf[16] = {
-		0, 0, 0, 0, 0, 0, 0, 0,
-		0x80000000, 0, 0, 0, 0, 0, 0, 0x00000300 //outerpad
+static void PBKDF2_SHA256_80_128 (const __m256i tstate, const __m256i ostate, const uint32_t *salt, __m256i output[4]) {
+	__m256i ibuf[2] = {
+		_mm256_setr_epi32 (
+			0, 0, 0, 0, 0,
+			0x80000000, 0, 0 //innerpad head
+		), _mm256_setr_epi32 (
+			0, 0, 0, 0, 0, 0, 0, 0x000004a0 //innerpad tail
+		)
 	};
 
-	*(__m256i*)istate = _mm256_loadu_si256 ((const __m256i*) tstate);
-	sha256_transform (istate, salt, 0);
+	__m256i obuf[2] = {
+		_mm256_setzero_si256 ()
+		, _mm256_setr_epi32 (
+			0x80000000, 0, 0, 0, 0, 0, 0, 0x00000300 //outerpad
+		)
+	};
+
+	__m256i istate = tstate;
+	sha256_transform_avx (&istate, (const __m256i*) salt, 0);
 
 	*(__m128i*) &ibuf[0] = _mm_loadu_si128 ((const __m128i*) &salt[16]);
 
-	__m256i swab = _mm256_setr_epi8 (
+	const __m256i swab = _mm256_setr_epi8 (
 		0x03, 0x02, 0x01, 0x00,
 		0x07, 0x06, 0x05, 0x04,
 		0x0b, 0x0a, 0x09, 0x08,
@@ -87,63 +78,66 @@ static void PBKDF2_SHA256_80_128 (const uint32_t *tstate, const uint32_t *ostate
 	);
 
 	//Step 1
-	*(__m256i*)obuf = _mm256_load_si256 ((const __m256i*) istate);
+	obuf[0] = istate;
+	__m256i ostate2 = ostate;
+	ibuf[0].m256i_u32[4] = 1;
 
-	ibuf[4] = 1;
-	sha256_transform (obuf, ibuf, 0);
-
-	*(__m256i*)ostate2 = _mm256_loadu_si256 ((const __m256i*) ostate);
-	sha256_transform (ostate2, obuf, 0);
-
-	((__m256i*)output)[0] = _mm256_shuffle_epi8 (*(__m256i*)ostate2, swab);
+	sha256_transform_avx (obuf, ibuf, 0);
+	sha256_transform_avx (&ostate2, obuf, 0);
+	output[0] = _mm256_shuffle_epi8 (ostate2, swab);
 
 	//Step 2
-	*(__m256i*)obuf = _mm256_load_si256 ((const __m256i*) istate);
+	obuf[0] = istate;
+	ostate2 = ostate;
+	ibuf[0].m256i_u32[4] = 2;
 
-	ibuf[4] = 2;
-	sha256_transform (obuf, ibuf, 0);
-
-	*(__m256i*)ostate2 = _mm256_loadu_si256 ((const __m256i*) ostate);
-	sha256_transform (ostate2, obuf, 0);
-
-	((__m256i*)output)[1] = _mm256_shuffle_epi8 (*(__m256i*)ostate2, swab);
+	sha256_transform_avx (obuf, ibuf, 0);
+	sha256_transform_avx (&ostate2, obuf, 0);
+	output[1] = _mm256_shuffle_epi8 (ostate2, swab);
 
 	//Step 3
-	*(__m256i*)obuf = _mm256_load_si256 ((const __m256i*) istate);
+	obuf[0] = istate;
+	ostate2 = ostate;
+	ibuf[0].m256i_u32[4] = 3;
 
-	ibuf[4] = 3;
-	sha256_transform (obuf, ibuf, 0);
-
-	*(__m256i*)ostate2 = _mm256_loadu_si256 ((const __m256i*) ostate);
-	sha256_transform (ostate2, obuf, 0);
-
-	((__m256i*)output)[2] = _mm256_shuffle_epi8 (*(__m256i*)ostate2, swab);
+	sha256_transform_avx (obuf, ibuf, 0);
+	sha256_transform_avx (&ostate2, obuf, 0);
+	output[2] = _mm256_shuffle_epi8 (ostate2, swab);
 
 	//Step 4
-	*(__m256i*)obuf = _mm256_load_si256 ((const __m256i*) istate);
+	obuf[0] = istate;
+	ostate2 = ostate;
+	ibuf[0].m256i_u32[4] = 4;
 
-	ibuf[4] = 4;
-	sha256_transform (obuf, ibuf, 0);
-
-	*(__m256i*)ostate2 = _mm256_loadu_si256 ((const __m256i*) ostate);
-	sha256_transform (ostate2, obuf, 0);
-
-	((__m256i*)output)[3] = _mm256_shuffle_epi8 (*(__m256i*)ostate2, swab);
+	sha256_transform_avx (obuf, ibuf, 0);
+	sha256_transform_avx (&ostate2, obuf, 0);
+	output[3] = _mm256_shuffle_epi8 (ostate2, swab);
 }
 
-static void PBKDF2_SHA256_128_32 (uint32_t *tstate, uint32_t *ostate, const uint32_t *salt, uint32_t *output) {
-	sha256_transform (tstate, salt, 1);
-	sha256_transform (tstate, salt + 16, 1);
-	sha256_transform (tstate, finalblk, 0);
+static void PBKDF2_SHA256_128_32 (__m256i& tstate, __m256i& ostate, const __m256i salt[4], uint32_t *output) {
+	sha256_transform_avx (&tstate, salt, 1);
+	sha256_transform_avx (&tstate, salt + 2, 1);
 
-	ALIGN_PREFIX (32) uint32_t buf[16] = {
-		tstate[0], tstate[1], tstate[2], tstate[3], tstate[4], tstate[5], tstate[6], tstate[7],
-		0x80000000, 0, 0, 0, 0, 0, 0, 0x00000300 //outerpad
+	__m256i finalblk[2] = {
+		_mm256_setr_epi32 (
+			0x00000001, 0x80000000, 0, 0, 0, 0, 0, 0
+		), _mm256_setr_epi32 (
+			0, 0, 0, 0, 0, 0, 0, 0x00000620
+		)
 	};
 
-	sha256_transform (ostate, buf, 0);
-	
-	__m256i swab = _mm256_setr_epi8 (
+	sha256_transform_avx (&tstate, finalblk, 0);
+
+	__m256i buf[2] = {
+		tstate
+		, _mm256_setr_epi32 (
+			0x80000000, 0, 0, 0, 0, 0, 0, 0x00000300 //outerpad
+		)
+	};
+
+	sha256_transform_avx (&ostate, buf, 0);
+
+	const __m256i swab = _mm256_setr_epi8 (
 		0x03, 0x02, 0x01, 0x00,
 		0x07, 0x06, 0x05, 0x04,
 		0x0b, 0x0a, 0x09, 0x08,
@@ -155,7 +149,7 @@ static void PBKDF2_SHA256_128_32 (uint32_t *tstate, uint32_t *ostate, const uint
 		0x0f, 0x0e, 0x0d, 0x0c
 	);
 
-	*(__m256i*) output =  _mm256_shuffle_epi8 (*(__m256i*)ostate, swab);
+	*(__m256i*) output =  _mm256_shuffle_epi8 (ostate, swab);
 }
 
 ALIGN_PREFIX (32) static uint32_t speedupSalsaCalcXBuffer[16 * 8];
@@ -369,41 +363,43 @@ static void scrypt_core (uint32_t* X) {
 #undef CORE2_STEP
 }
 
-static void scrypt_1024_1_1_256 (uint32_t stepCount, const uint32_t *input, uint32_t *output, uint32_t *midstate) {
-	ALIGN_PREFIX (32) uint32_t tstate[8 * SCRYPT_STEP_COUNT];
-	ALIGN_PREFIX (32) uint32_t ostate[8 * SCRYPT_STEP_COUNT];
-	ALIGN_PREFIX (32) uint32_t X[32 * SCRYPT_STEP_COUNT];
+static void scrypt_1024_1_1_256 (uint32_t stepCount, const uint32_t *input, uint32_t *output, const __m256i midstate[8]) {
+	__m256i ostate[SCRYPT_STEP_COUNT];
+	__m256i X[4 * SCRYPT_STEP_COUNT];
 
-	memcpy (tstate, midstate, 32 * SCRYPT_STEP_COUNT);
+	//memcpy (tstate, midstate, 32 * SCRYPT_STEP_COUNT);
+	__m256i tstate[SCRYPT_STEP_COUNT] = {
+		midstate[0], midstate[1], midstate[2], midstate[3], midstate[4], midstate[5], midstate[6], midstate[7]
+	};
 
-	HMAC_SHA256_80_init (&input[0 * 20], &tstate[0 * 8], &ostate[0 * 8]);
-	HMAC_SHA256_80_init (&input[1 * 20], &tstate[1 * 8], &ostate[1 * 8]);
-	HMAC_SHA256_80_init (&input[2 * 20], &tstate[2 * 8], &ostate[2 * 8]);
-	HMAC_SHA256_80_init (&input[3 * 20], &tstate[3 * 8], &ostate[3 * 8]);
-	HMAC_SHA256_80_init (&input[4 * 20], &tstate[4 * 8], &ostate[4 * 8]);
-	HMAC_SHA256_80_init (&input[5 * 20], &tstate[5 * 8], &ostate[5 * 8]);
-	HMAC_SHA256_80_init (&input[6 * 20], &tstate[6 * 8], &ostate[6 * 8]);
-	HMAC_SHA256_80_init (&input[7 * 20], &tstate[7 * 8], &ostate[7 * 8]);
+	HMAC_SHA256_80_init (&input[0 * 20], tstate[0], ostate[0]);
+	HMAC_SHA256_80_init (&input[1 * 20], tstate[1], ostate[1]);
+	HMAC_SHA256_80_init (&input[2 * 20], tstate[2], ostate[2]);
+	HMAC_SHA256_80_init (&input[3 * 20], tstate[3], ostate[3]);
+	HMAC_SHA256_80_init (&input[4 * 20], tstate[4], ostate[4]);
+	HMAC_SHA256_80_init (&input[5 * 20], tstate[5], ostate[5]);
+	HMAC_SHA256_80_init (&input[6 * 20], tstate[6], ostate[6]);
+	HMAC_SHA256_80_init (&input[7 * 20], tstate[7], ostate[7]);
 
-	PBKDF2_SHA256_80_128 (&tstate[0 * 8], &ostate[0 * 8], &input[0 * 20], &X[0 * 32]);
-	PBKDF2_SHA256_80_128 (&tstate[1 * 8], &ostate[1 * 8], &input[1 * 20], &X[1 * 32]);
-	PBKDF2_SHA256_80_128 (&tstate[2 * 8], &ostate[2 * 8], &input[2 * 20], &X[2 * 32]);
-	PBKDF2_SHA256_80_128 (&tstate[3 * 8], &ostate[3 * 8], &input[3 * 20], &X[3 * 32]);
-	PBKDF2_SHA256_80_128 (&tstate[4 * 8], &ostate[4 * 8], &input[4 * 20], &X[4 * 32]);
-	PBKDF2_SHA256_80_128 (&tstate[5 * 8], &ostate[5 * 8], &input[5 * 20], &X[5 * 32]);
-	PBKDF2_SHA256_80_128 (&tstate[6 * 8], &ostate[6 * 8], &input[6 * 20], &X[6 * 32]);
-	PBKDF2_SHA256_80_128 (&tstate[7 * 8], &ostate[7 * 8], &input[7 * 20], &X[7 * 32]);
+	PBKDF2_SHA256_80_128 (tstate[0], ostate[0], &input[0 * 20], &X[0 * 4]);
+	PBKDF2_SHA256_80_128 (tstate[1], ostate[1], &input[1 * 20], &X[1 * 4]);
+	PBKDF2_SHA256_80_128 (tstate[2], ostate[2], &input[2 * 20], &X[2 * 4]);
+	PBKDF2_SHA256_80_128 (tstate[3], ostate[3], &input[3 * 20], &X[3 * 4]);
+	PBKDF2_SHA256_80_128 (tstate[4], ostate[4], &input[4 * 20], &X[4 * 4]);
+	PBKDF2_SHA256_80_128 (tstate[5], ostate[5], &input[5 * 20], &X[5 * 4]);
+	PBKDF2_SHA256_80_128 (tstate[6], ostate[6], &input[6 * 20], &X[6 * 4]);
+	PBKDF2_SHA256_80_128 (tstate[7], ostate[7], &input[7 * 20], &X[7 * 4]);
 
-	scrypt_core (X);
+	scrypt_core ((uint32_t*) X);
 
-	PBKDF2_SHA256_128_32 (&tstate[0 * 8], &ostate[0 * 8], &X[0 * 32], &output[0 * 8]);
-	PBKDF2_SHA256_128_32 (&tstate[1 * 8], &ostate[1 * 8], &X[1 * 32], &output[1 * 8]);
-	PBKDF2_SHA256_128_32 (&tstate[2 * 8], &ostate[2 * 8], &X[2 * 32], &output[2 * 8]);
-	PBKDF2_SHA256_128_32 (&tstate[3 * 8], &ostate[3 * 8], &X[3 * 32], &output[3 * 8]);
-	PBKDF2_SHA256_128_32 (&tstate[4 * 8], &ostate[4 * 8], &X[4 * 32], &output[4 * 8]);
-	PBKDF2_SHA256_128_32 (&tstate[5 * 8], &ostate[5 * 8], &X[5 * 32], &output[5 * 8]);
-	PBKDF2_SHA256_128_32 (&tstate[6 * 8], &ostate[6 * 8], &X[6 * 32], &output[6 * 8]);
-	PBKDF2_SHA256_128_32 (&tstate[7 * 8], &ostate[7 * 8], &X[7 * 32], &output[7 * 8]);
+	PBKDF2_SHA256_128_32 (tstate[0], ostate[0], &X[0 * 4], &output[0 * 8]);
+	PBKDF2_SHA256_128_32 (tstate[1], ostate[1], &X[1 * 4], &output[1 * 8]);
+	PBKDF2_SHA256_128_32 (tstate[2], ostate[2], &X[2 * 4], &output[2 * 8]);
+	PBKDF2_SHA256_128_32 (tstate[3], ostate[3], &X[3 * 4], &output[3 * 8]);
+	PBKDF2_SHA256_128_32 (tstate[4], ostate[4], &X[4 * 4], &output[4 * 8]);
+	PBKDF2_SHA256_128_32 (tstate[5], ostate[5], &X[5 * 4], &output[5 * 8]);
+	PBKDF2_SHA256_128_32 (tstate[6], ostate[6], &X[6 * 4], &output[6 * 8]);
+	PBKDF2_SHA256_128_32 (tstate[7], ostate[7], &X[7 * 4], &output[7 * 8]);
 }
 
 //Speedup cypher caller
@@ -416,7 +412,7 @@ void releaseSpeedupCypher () {
 }
 
 void speedupCypher (uint32_t stepCount, const uint32_t* input, uint32_t* output, size_t sourceIntegerCount, size_t targetIntegerCount) {
-	uint32_t midstate[8 * SCRYPT_STEP_COUNT] = { 1, 2, 3, 4, 5, 6, 7, 8,
+	ALIGN_PREFIX (32) uint32_t midstate[8 * SCRYPT_STEP_COUNT] = { 1, 2, 3, 4, 5, 6, 7, 8,
 		1, 2, 3, 4, 5, 6, 7, 8,
 		1, 2, 3, 4, 5, 6, 7, 8,
 		1, 2, 3, 4, 5, 6, 7, 8,
@@ -425,7 +421,7 @@ void speedupCypher (uint32_t stepCount, const uint32_t* input, uint32_t* output,
 		1, 2, 3, 4, 5, 6, 7, 8,
 		1, 2, 3, 4, 5, 6, 7, 8 }; //test values
 
-	scrypt_1024_1_1_256 (stepCount, input, output, midstate);
+	scrypt_1024_1_1_256 (stepCount, input, output, (const __m256i*) midstate);
 
 	////TEST
 	//FILE* fout = fopen ("d:\\work\\salsa2\\new.dat", "ab"); //"wb" to delete content
