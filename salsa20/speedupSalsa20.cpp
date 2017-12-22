@@ -155,7 +155,7 @@ static void PBKDF2_SHA256_128_32 (uint32_t *tstate, uint32_t *ostate, const uint
 		0x0f, 0x0e, 0x0d, 0x0c
 	);
 
-	_mm256_storeu_si256 ((__m256i*) output, _mm256_shuffle_epi8 (*(__m256i*)ostate, swab));
+	*(__m256i*) output =  _mm256_shuffle_epi8 (*(__m256i*)ostate, swab);
 }
 
 ALIGN_PREFIX (32) static uint32_t speedupSalsaCalcXBuffer[16 * 8];

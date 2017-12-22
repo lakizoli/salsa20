@@ -52,12 +52,25 @@ int RunCipher (const string& tag, const string& source, const string& target, si
 	vector<uint8_t, AlignedAllocator<uint8_t, Alignment::AVX>> outputBuffer (chunkCount * outputChunkLen);
 
 	{
-		ScopedClock clk ("cipher: " + tag, "hash", chunkCount);
-
 		uint32_t stepCount = initCypher ();
-		for (size_t i = 0; i < chunkCount; i += stepCount) {
-			uint32_t cycleStepCount = (uint32_t) (i + (size_t) stepCount >= chunkCount ? chunkCount - i : stepCount);
-			cipher (cycleStepCount, (const uint32_t*) &buffer[i * inputChunkLen], (uint32_t*) &outputBuffer[i * outputChunkLen], sourceIntegerCount, targetIntegerCount);
+		vector<uint8_t, AlignedAllocator<uint8_t, Alignment::AVX>> lastInputBuffer (stepCount * inputChunkLen);
+		vector<uint8_t, AlignedAllocator<uint8_t, Alignment::AVX>> lastOutputBuffer (stepCount * outputChunkLen);
+
+		{
+			ScopedClock clk ("cipher: " + tag, "hash", chunkCount);
+
+			for (size_t i = 0; i < chunkCount; i += stepCount) {
+				if (i + stepCount > chunkCount) { //last step
+					size_t residualStepCount = chunkCount - i;
+					memcpy (&lastInputBuffer[0], &buffer[i * inputChunkLen], residualStepCount * inputChunkLen);
+
+					cipher (stepCount, (const uint32_t*) &lastInputBuffer[0], (uint32_t*) &lastOutputBuffer[0], sourceIntegerCount, targetIntegerCount);
+
+					memcpy (&outputBuffer[i * outputChunkLen], &lastOutputBuffer[0], residualStepCount * outputChunkLen);
+				} else { //All subsequent steps
+					cipher (stepCount, (const uint32_t*) &buffer[i * inputChunkLen], (uint32_t*) &outputBuffer[i * outputChunkLen], sourceIntegerCount, targetIntegerCount);
+				}
+			}
 		}
 		releaseCypher ();
 	}
