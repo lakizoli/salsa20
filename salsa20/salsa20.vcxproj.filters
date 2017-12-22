@@ -14,4 +14,7 @@
     <ClInclude Include="ScopedClock.hpp" />
     <ClInclude Include="alignedallocator.h" />
   </ItemGroup>
+  <ItemGroup>
+    <MASM Include="prepareSalsa8.asm" />
+  </ItemGroup>
 </Project>

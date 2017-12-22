@@ -32,6 +32,9 @@
     <ClInclude Include="defs.h" />
     <ClInclude Include="ScopedClock.hpp" />
   </ItemGroup>
+  <ItemGroup>
+    <MASM Include="prepareSalsa8.asm" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{D4C7BEE1-ACEB-4076-A77F-B30F3A433BA6}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
@@ -145,7 +148,7 @@
       <WarningLevel>Level3</WarningLevel>
       <PrecompiledHeader>
       </PrecompiledHeader>
-      <Optimization>MaxSpeed</Optimization>
+      <Optimization>Full</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
