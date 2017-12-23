@@ -15,6 +15,6 @@
     <ClInclude Include="alignedallocator.h" />
   </ItemGroup>
   <ItemGroup>
-    <MASM Include="prepareSalsa8.asm" />
+    <MASM Include="salsa8.asm" />
   </ItemGroup>
 </Project>

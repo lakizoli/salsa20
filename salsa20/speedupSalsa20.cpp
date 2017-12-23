@@ -6,6 +6,7 @@
 #define ALIGN_PREFIX(x) __declspec(align(x))
 
 #define SCRYPT_THREAD_COUNT 8
+//#define SCRYPT_USE_ASM
 
 extern "C" {
 	void sha256_transform_avx (__m256i state[1], const __m256i block[2], int swap);
@@ -154,39 +155,41 @@ static void PBKDF2_SHA256_128_32 (__m256i& tstate, __m256i& ostate, const __m256
 
 static __m256i speedupSalsaCalcX[16];
 
-extern "C" void prepare_salsa8_xor (const uint64_t* input, uint64_t* output);
-extern "C" void prepare_salsa8_gather (const __m256i* output, __m256i* calcX);
+extern "C" void asm_salsa8_parallel_xor (const uint64_t* input, uint64_t* output);
+extern "C" void asm_salsa8_parallel_gather (const __m256i* output, __m256i* calcX);
 
 static void xor_prepare_salsa8_parallel (__m256i input[2 * SCRYPT_THREAD_COUNT], __m256i output[2 * SCRYPT_THREAD_COUNT], uint32_t threadLen) {
+#ifdef SCRYPT_USE_ASM
+	asm_salsa8_parallel_xor ((uint64_t*) &input[0], (uint64_t*) &output[0]);
+	asm_salsa8_parallel_gather (output, speedupSalsaCalcX);
+#else //SCRYPT_USE_ASM
 	//8x input[0] -> x00..08 (xorX[thread*2 + 0]), input[1] -> x09..x15 (xorX[thread*2 + 1])
 	//__m256i xorX[16] = {
-		////thread 0
-		//output[0 * threadLen + 0] = _mm256_xor_si256 (output[0 * threadLen + 0], input[0 * threadLen + 0]);
-		//output[0 * threadLen + 1] = _mm256_xor_si256 (output[0 * threadLen + 1], input[0 * threadLen + 1]);
-		////thread 1
-		//output[1 * threadLen + 0] = _mm256_xor_si256 (output[1 * threadLen + 0], input[1 * threadLen + 0]);
-		//output[1 * threadLen + 1] = _mm256_xor_si256 (output[1 * threadLen + 1], input[1 * threadLen + 1]);
-		////thread 2
-		//output[2 * threadLen + 0] = _mm256_xor_si256 (output[2 * threadLen + 0], input[2 * threadLen + 0]);
-		//output[2 * threadLen + 1] = _mm256_xor_si256 (output[2 * threadLen + 1], input[2 * threadLen + 1]);
-		////thread 3
-		//output[3 * threadLen + 0] = _mm256_xor_si256 (output[3 * threadLen + 0], input[3 * threadLen + 0]);
-		//output[3 * threadLen + 1] = _mm256_xor_si256 (output[3 * threadLen + 1], input[3 * threadLen + 1]);
-		////thread 4
-		//output[4 * threadLen + 0] = _mm256_xor_si256 (output[4 * threadLen + 0], input[4 * threadLen + 0]);
-		//output[4 * threadLen + 1] = _mm256_xor_si256 (output[4 * threadLen + 1], input[4 * threadLen + 1]);
-		////thread 5
-		//output[5 * threadLen + 0] = _mm256_xor_si256 (output[5 * threadLen + 0], input[5 * threadLen + 0]);
-		//output[5 * threadLen + 1] = _mm256_xor_si256 (output[5 * threadLen + 1], input[5 * threadLen + 1]);
-		////thread 6
-		//output[6 * threadLen + 0] = _mm256_xor_si256 (output[6 * threadLen + 0], input[6 * threadLen + 0]);
-		//output[6 * threadLen + 1] = _mm256_xor_si256 (output[6 * threadLen + 1], input[6 * threadLen + 1]);
-		////thread 7
-		//output[7 * threadLen + 0] = _mm256_xor_si256 (output[7 * threadLen + 0], input[7 * threadLen + 0]);
-		//output[7 * threadLen + 1] = _mm256_xor_si256 (output[7 * threadLen + 1], input[7 * threadLen + 1]);
+		//thread 0
+		output[0 * threadLen + 0] = _mm256_xor_si256 (output[0 * threadLen + 0], input[0 * threadLen + 0]);
+		output[0 * threadLen + 1] = _mm256_xor_si256 (output[0 * threadLen + 1], input[0 * threadLen + 1]);
+		//thread 1
+		output[1 * threadLen + 0] = _mm256_xor_si256 (output[1 * threadLen + 0], input[1 * threadLen + 0]);
+		output[1 * threadLen + 1] = _mm256_xor_si256 (output[1 * threadLen + 1], input[1 * threadLen + 1]);
+		//thread 2
+		output[2 * threadLen + 0] = _mm256_xor_si256 (output[2 * threadLen + 0], input[2 * threadLen + 0]);
+		output[2 * threadLen + 1] = _mm256_xor_si256 (output[2 * threadLen + 1], input[2 * threadLen + 1]);
+		//thread 3
+		output[3 * threadLen + 0] = _mm256_xor_si256 (output[3 * threadLen + 0], input[3 * threadLen + 0]);
+		output[3 * threadLen + 1] = _mm256_xor_si256 (output[3 * threadLen + 1], input[3 * threadLen + 1]);
+		//thread 4
+		output[4 * threadLen + 0] = _mm256_xor_si256 (output[4 * threadLen + 0], input[4 * threadLen + 0]);
+		output[4 * threadLen + 1] = _mm256_xor_si256 (output[4 * threadLen + 1], input[4 * threadLen + 1]);
+		//thread 5
+		output[5 * threadLen + 0] = _mm256_xor_si256 (output[5 * threadLen + 0], input[5 * threadLen + 0]);
+		output[5 * threadLen + 1] = _mm256_xor_si256 (output[5 * threadLen + 1], input[5 * threadLen + 1]);
+		//thread 6
+		output[6 * threadLen + 0] = _mm256_xor_si256 (output[6 * threadLen + 0], input[6 * threadLen + 0]);
+		output[6 * threadLen + 1] = _mm256_xor_si256 (output[6 * threadLen + 1], input[6 * threadLen + 1]);
+		//thread 7
+		output[7 * threadLen + 0] = _mm256_xor_si256 (output[7 * threadLen + 0], input[7 * threadLen + 0]);
+		output[7 * threadLen + 1] = _mm256_xor_si256 (output[7 * threadLen + 1], input[7 * threadLen + 1]);
 	//};
-
-	prepare_salsa8_xor ((uint64_t*) &input[0], (uint64_t*) &output[0]);
 
 	//Transpose matrix (calcX[i] = xorX[0].m256i_u32[i] <= i=0..7, calcX[i] = xorX[1].m256i_u32[i-8] <= i=8..15)
 	const __m256i vindex = _mm256_setr_epi32 (0, threadLen * 8, 2 * threadLen * 8, 3 * threadLen * 8, 4 * threadLen * 8, 5 * threadLen * 8, 6 * threadLen * 8, 7 * threadLen * 8);
@@ -209,8 +212,7 @@ static void xor_prepare_salsa8_parallel (__m256i input[2 * SCRYPT_THREAD_COUNT],
 	speedupSalsaCalcX[13] = _mm256_i32gather_epi32 (xBase + 13, vindex, 4);
 	speedupSalsaCalcX[14] = _mm256_i32gather_epi32 (xBase + 14, vindex, 4);
 	speedupSalsaCalcX[15] = _mm256_i32gather_epi32 (xBase + 15, vindex, 4);
-
-	prepare_salsa8_gather (output, speedupSalsaCalcX);
+#endif //SCRYPT_USE_ASM
 }
 
 static void xor_salsa8_parallel () {

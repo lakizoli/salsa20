@@ -1,9 +1,16 @@
 .data
 ; caption db '64-bit hello!', 0
 ; message db 'Hello World!', 0
+
+
 .code
-PUBLIC prepare_salsa8_xor
-prepare_salsa8_xor PROC
+
+; ********************************************************************************
+; First step of salsa8 calculation (xor input and output for all threads)
+; ********************************************************************************
+
+PUBLIC asm_salsa8_parallel_xor
+asm_salsa8_parallel_xor PROC
   sub		rsp,28h      ; shadow space, aligns stack
 
   mov		r8, rcx
@@ -25,12 +32,12 @@ step_xor:
 
   add		rsp, 28h
   ret
-prepare_salsa8_xor ENDP
+asm_salsa8_parallel_xor ENDP
 
 
 
-PUBLIC prepare_salsa8_gather
-prepare_salsa8_gather PROC
+PUBLIC asm_salsa8_parallel_gather
+asm_salsa8_parallel_gather PROC
   sub		rsp,28h      ; shadow space, aligns stack
 
 ;gather
@@ -43,7 +50,7 @@ prepare_salsa8_gather PROC
 
   add		rsp, 28h
   ret
-prepare_salsa8_gather ENDP
+asm_salsa8_parallel_gather ENDP
 
 
 

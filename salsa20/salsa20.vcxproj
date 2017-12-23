@@ -33,7 +33,7 @@
     <ClInclude Include="ScopedClock.hpp" />
   </ItemGroup>
   <ItemGroup>
-    <MASM Include="prepareSalsa8.asm" />
+    <MASM Include="salsa8.asm" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{D4C7BEE1-ACEB-4076-A77F-B30F3A433BA6}</ProjectGuid>
