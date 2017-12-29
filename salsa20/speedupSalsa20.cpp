@@ -245,7 +245,7 @@ static void xor_postprocess_salsa8_parallel (__m256i output[2 * SCRYPT_THREAD_CO
 
 static __m256i speedupScryptV[1024 * 4 * SCRYPT_THREAD_COUNT];
 
-static void scrypt_prepare_pass1_step (uint32_t cycle, __m256i X[4 * SCRYPT_THREAD_COUNT]) {
+static void sp_scrypt_prepare_pass1_step (uint32_t cycle, __m256i X[4 * SCRYPT_THREAD_COUNT]) {
 	uint8_t thread = SCRYPT_THREAD_COUNT;
 	while (thread--) {
 		speedupScryptV[(thread * 1024 + cycle) * 4 + 0] = X[thread * 4 + 0];
@@ -255,7 +255,7 @@ static void scrypt_prepare_pass1_step (uint32_t cycle, __m256i X[4 * SCRYPT_THRE
 	}
 }
 
-static void scrypt_prepare_pass2_step (__m256i X[4 * SCRYPT_THREAD_COUNT]) {
+static void sp_scrypt_prepare_pass2_step (__m256i X[4 * SCRYPT_THREAD_COUNT]) {
 	uint8_t thread = SCRYPT_THREAD_COUNT;
 	while (thread--) {
 		uint32_t j = 4 * (X[thread * 4 + 2].m256i_u32[0] & (1024 - 1));
@@ -268,10 +268,10 @@ static void scrypt_prepare_pass2_step (__m256i X[4 * SCRYPT_THREAD_COUNT]) {
 	}
 }
 
-static void scrypt_core (__m256i X[4 * SCRYPT_THREAD_COUNT]) {
+static void sp_scrypt_core (__m256i X[4 * SCRYPT_THREAD_COUNT]) {
 	uint16_t step = 1024;
 	while (step--) {
-		scrypt_prepare_pass1_step ((uint32_t) 1024 - step - 1, X);
+		sp_scrypt_prepare_pass1_step ((uint32_t) 1024 - step - 1, X);
 
 		xor_prepare_salsa8_parallel (&X[2], &X[0], 4);
 		xor_salsa8_parallel ();
@@ -284,7 +284,7 @@ static void scrypt_core (__m256i X[4 * SCRYPT_THREAD_COUNT]) {
 
 	step = 1024;
 	while (step--) {
-		scrypt_prepare_pass2_step (X);
+		sp_scrypt_prepare_pass2_step (X);
 
 		xor_prepare_salsa8_parallel (&X[2], &X[0], 4);
 		xor_salsa8_parallel ();
@@ -310,7 +310,7 @@ static void sp_scrypt_1024_1_1_256 (const uint32_t *input, uint32_t *output, con
 		PBKDF2_SHA256_80_128 (tstate[thread], ostate[thread], &input[thread * 20], &X[thread * 4]);
 	}
 
-	scrypt_core (X);
+	sp_scrypt_core (X);
 
 	thread = SCRYPT_THREAD_COUNT;
 	while (thread--) {
