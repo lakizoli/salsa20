@@ -25,12 +25,19 @@ extern int RunCipher (const string& tag, const string& source, const string& tar
 
 extern int HasSameContent (const string& file1, const string& file2, bool& same);
 
+extern void speedUpAssessment ();
+
 static int PrintUsage (char* exePath) {
 	cout << "Usage:" << endl << endl << fs::absolute (exePath).filename ().string () << " <source file path> <reference target file path> <speedup target file path>" << endl << endl;
 	return ERROR;
 }
 
 int main (int argc, char* argv[]) {
+	////ASSESSMENT
+	//speedUpAssessment ();
+	//return SUCCESS;
+	////END ASSESSMENT
+
 	//Read parameters
 	if (argc < 4) {
 		assert (argc >= 1);

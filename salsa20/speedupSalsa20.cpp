@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 #include <intrin.h>
+#include <iostream>
+#include <iomanip>
 
 #define ALIGN_PREFIX(x) __declspec(align(x))
 
@@ -349,4 +351,29 @@ void speedupCypher (const uint32_t* input, uint32_t* output) {
 	//	fclose (fout);
 	//}
 	////END TEST
+}
+
+//Speedup assessment
+
+void speedUpAssessment () {
+	ALIGN_PREFIX (32) uint8_t buffer[128 * SCRYPT_THREAD_COUNT]; //32 * uint32_t / thread
+
+	for (uint32_t phase = 0; phase < 256; ++phase) {
+		std::cout << "num: 0x" << std::setfill ('0') << std::setw (2) << std::hex << (uint32_t) (uint8_t) phase << std::endl;
+
+		memset (buffer, 0, 128 * SCRYPT_THREAD_COUNT);
+		for (uint32_t i = 0; i < 128; ++i) {
+			buffer[1] = (uint8_t) phase;
+			break;
+		}
+
+		sp_scrypt_core ((__m256i*) buffer);
+
+		for (uint32_t i = 0; i < 128; ++i) {
+			std::cout << std::setfill ('0') << std::setw (2) << std::hex << (uint32_t) buffer[i];
+		}
+		std::cout << std::endl;
+	}
+
+	std::cout << "juhu";
 }

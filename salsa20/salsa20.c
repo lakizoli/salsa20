@@ -224,8 +224,6 @@ void releaseReferenceCypher () {
 }
 
 void referenceCypher (const uint32_t* input, uint32_t* output) {
-	assert (stepCount == 1);
-
 	uint32_t midstate[8] = { 1, 2, 3, 4, 5, 6, 7, 8 }; //test values
 
 	scrypt_1024_1_1_256 (input, output, midstate, g_reference_scratchpad, SCRYPT_ITERATION_COUNT);
