@@ -163,7 +163,7 @@ static __m256i speedupSalsaCalcX[16];
 	extern "C" void asm_salsa8_parallel_postprocess (const __m256i* calcX, __m256i* output);
 #endif //SCRYPT_USE_ASM
 
-static void xor_prepare_salsa8_parallel (__m256i input[2 * SCRYPT_THREAD_COUNT], __m256i output[2 * SCRYPT_THREAD_COUNT], uint32_t threadLen) {
+static void sp_prepare_salsa8_parallel (__m256i input[2 * SCRYPT_THREAD_COUNT], __m256i output[2 * SCRYPT_THREAD_COUNT], uint32_t threadLen) {
 #ifdef SCRYPT_USE_ASM
 	asm_salsa8_parallel_xor (input, output);
 	asm_salsa8_parallel_gather (output, speedupSalsaCalcX);
@@ -188,47 +188,95 @@ static void xor_prepare_salsa8_parallel (__m256i input[2 * SCRYPT_THREAD_COUNT],
 #endif //SCRYPT_USE_ASM
 }
 
-static void xor_salsa8_parallel () {
-	//#define R(a, b) (((a) << (b)) | ((a) >> (32 - (b))))
-#define R(res, add1, add2, shift)																	\
-		calcX[res] = _mm256_xor_si256 (																\
-			calcX[res],																				\
-			_mm256_or_si256 (																		\
-				_mm256_slli_epi32 (_mm256_add_epi32 (calcX[add1], calcX[add2]), shift),				\
-				_mm256_srli_epi32 (_mm256_add_epi32 (calcX[add1], calcX[add2]), 32 - shift)			\
-			)																						\
-		)
+static void sp_salsa8_step_tile (__m256i& res1, __m256i& res2, __m256i& res3, __m256i& res4, 
+	__m256i fadd1, __m256i fadd2, __m256i fadd3, __m256i fadd4,
+	__m256i sadd1, __m256i sadd2, __m256i sadd3, __m256i sadd4,
+	uint32_t shift)
+{
+	__m256i add1 = _mm256_add_epi32 (fadd1, sadd1);
+	__m256i add2 = _mm256_add_epi32 (fadd2, sadd2);
+	__m256i add3 = _mm256_add_epi32 (fadd3, sadd3);
+	__m256i add4 = _mm256_add_epi32 (fadd4, sadd4);
 
-#define SALSA_STEP()										\
-		R (4, 0, 12, 7);	R (9, 5, 1, 7);					\
-		R (14, 10, 6, 7);	R (3, 15, 11, 7);				\
-		R (8, 4, 0, 9);		R (13, 9, 5, 9);				\
-		R (2, 14, 10, 9);	R (7, 3, 15, 9);				\
-		R (12, 8, 4, 13);	R (1, 13, 9, 13);				\
-		R (6, 2, 14, 13);	R (11, 7, 3, 13);				\
-		R (0, 12, 8, 18);	R (5, 1, 13, 18);				\
-		R (10, 6, 2, 18);	R (15, 11, 7, 18);				\
-															\
-		R (1, 0, 3, 7);		R (6, 5, 4, 7);					\
-		R (11, 10, 9, 7);	R (12, 15, 14, 7);				\
-		R (2, 1, 0, 9);		R (7, 6, 5, 9);					\
-		R (8, 11, 10, 9);	R (13, 12, 15, 9);				\
-		R (3, 2, 1, 13);	R (4, 7, 6, 13);				\
-		R (9, 8, 11, 13);	R (14, 13, 12, 13);				\
-		R (0, 3, 2, 18);	R (5, 4, 7, 18);				\
-		R (10, 9, 8, 18);	R (15, 14, 13, 18);
+	__m256i shl1 = _mm256_slli_epi32 (add1, shift);
+	__m256i shl2 = _mm256_slli_epi32 (add2, shift);
+	__m256i shl3 = _mm256_slli_epi32 (add3, shift);
+	__m256i shl4 = _mm256_slli_epi32 (add4, shift);
 
-	__m256i* calcX = speedupSalsaCalcX;
-	SALSA_STEP ();
-	SALSA_STEP ();
-	SALSA_STEP ();
-	SALSA_STEP ();
+	__m256i shr1 = _mm256_srli_epi32 (add1, 32 - shift);
+	__m256i shr2 = _mm256_srli_epi32 (add2, 32 - shift);
+	__m256i shr3 = _mm256_srli_epi32 (add3, 32 - shift);
+	__m256i shr4 = _mm256_srli_epi32 (add4, 32 - shift);
 
-#undef SALSA_STEP
-#undef R
+	__m256i or1 = _mm256_or_si256 (shl1, shr1);
+	__m256i or2 = _mm256_or_si256 (shl2, shr2);
+	__m256i or3 = _mm256_or_si256 (shl3, shr3);
+	__m256i or4 = _mm256_or_si256 (shl4, shr4);
+
+	res1 = _mm256_xor_si256 (res1, or1);
+	res2 = _mm256_xor_si256 (res2, or2);
+	res3 = _mm256_xor_si256 (res3, or3);
+	res4 = _mm256_xor_si256 (res4, or4);
 }
 
-static void xor_postprocess_salsa8_parallel (__m256i output[2 * SCRYPT_THREAD_COUNT], uint32_t threadLen) {
+static void sp_salsa8_parallel () {
+	__m256i* calcX = speedupSalsaCalcX;
+
+	uint32_t stepCount = 4;
+	while (stepCount--) {
+		//First tile block
+		sp_salsa8_step_tile (
+			calcX[ 4], calcX[ 9], calcX[14], calcX[ 3],
+			calcX[ 0], calcX[ 5], calcX[10], calcX[15],
+			calcX[12], calcX[ 1], calcX[ 6], calcX[11],
+			7);
+
+		sp_salsa8_step_tile (
+			calcX[ 8], calcX[13], calcX[ 2], calcX[ 7],
+			calcX[ 4], calcX[ 9], calcX[14], calcX[ 3],
+			calcX[ 0], calcX[ 5], calcX[10], calcX[15],
+			9);
+
+		sp_salsa8_step_tile (
+			calcX[12], calcX[ 1], calcX[ 6], calcX[11],
+			calcX[ 8], calcX[13], calcX[ 2], calcX[ 7],
+			calcX[ 4], calcX[ 9], calcX[14], calcX[ 3],
+			13);
+
+		sp_salsa8_step_tile (
+			calcX[ 0], calcX[ 5], calcX[10], calcX[15],
+			calcX[12], calcX[ 1], calcX[ 6], calcX[11],
+			calcX[ 8], calcX[13], calcX[ 2], calcX[ 7],
+			18);
+
+		//Second tile block
+		sp_salsa8_step_tile (
+			calcX[ 1], calcX[ 6], calcX[11], calcX[12],
+			calcX[ 0], calcX[ 5], calcX[10], calcX[15],
+			calcX[ 3], calcX[ 4], calcX[ 9], calcX[14],
+			7);
+
+		sp_salsa8_step_tile (
+			calcX[ 2], calcX[ 7], calcX[ 8], calcX[13],
+			calcX[ 1], calcX[ 6], calcX[11], calcX[12],
+			calcX[ 0], calcX[ 5], calcX[10], calcX[15],
+			9);
+
+		sp_salsa8_step_tile (
+			calcX[ 3], calcX[ 4], calcX[ 9], calcX[14],
+			calcX[ 2], calcX[ 7], calcX[ 8], calcX[13],
+			calcX[ 1], calcX[ 6], calcX[11], calcX[12],
+			13);
+
+		sp_salsa8_step_tile (
+			calcX[ 0], calcX[ 5], calcX[10], calcX[15],
+			calcX[ 3], calcX[ 4], calcX[ 9], calcX[14],
+			calcX[ 2], calcX[ 7], calcX[ 8], calcX[13],
+			18);
+	}
+}
+
+static void sp_postprocess_salsa8_parallel (__m256i output[2 * SCRYPT_THREAD_COUNT], uint32_t threadLen) {
 #ifdef SCRYPT_USE_ASM
 	asm_salsa8_parallel_postprocess (speedupSalsaCalcX, output);
 #else //SCRYPT_USE_ASM
@@ -275,26 +323,26 @@ static void sp_scrypt_core (__m256i X[4 * SCRYPT_THREAD_COUNT]) {
 	while (step--) {
 		sp_scrypt_prepare_pass1_step ((uint32_t) 1024 - step - 1, X);
 
-		xor_prepare_salsa8_parallel (&X[2], &X[0], 4);
-		xor_salsa8_parallel ();
-		xor_postprocess_salsa8_parallel (&X[0], 4);
+		sp_prepare_salsa8_parallel (&X[2], &X[0], 4);
+		sp_salsa8_parallel ();
+		sp_postprocess_salsa8_parallel (&X[0], 4);
 
-		xor_prepare_salsa8_parallel (&X[0], &X[2], 4);
-		xor_salsa8_parallel ();
-		xor_postprocess_salsa8_parallel (&X[2], 4);
+		sp_prepare_salsa8_parallel (&X[0], &X[2], 4);
+		sp_salsa8_parallel ();
+		sp_postprocess_salsa8_parallel (&X[2], 4);
 	}
 
 	step = 1024;
 	while (step--) {
 		sp_scrypt_prepare_pass2_step (X);
 
-		xor_prepare_salsa8_parallel (&X[2], &X[0], 4);
-		xor_salsa8_parallel ();
-		xor_postprocess_salsa8_parallel (&X[0], 4);
+		sp_prepare_salsa8_parallel (&X[2], &X[0], 4);
+		sp_salsa8_parallel ();
+		sp_postprocess_salsa8_parallel (&X[0], 4);
 
-		xor_prepare_salsa8_parallel (&X[0], &X[2], 4);
-		xor_salsa8_parallel ();
-		xor_postprocess_salsa8_parallel (&X[2], 4);
+		sp_prepare_salsa8_parallel (&X[0], &X[2], 4);
+		sp_salsa8_parallel ();
+		sp_postprocess_salsa8_parallel (&X[2], 4);
 	}
 }
 
